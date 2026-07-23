@@ -96,8 +96,17 @@ app.post('/analyze', async (req, res) => {
       }
     );
     const text = await response.text();
-    res.json(JSON.parse(text));
+    console.log('Apps Script response:', text.slice(0, 500));
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch(e) {
+      console.error('Parse error:', e.message, 'Raw:', text.slice(0, 200));
+      return res.status(500).json({ error: 'Apps Script returned invalid JSON: ' + text.slice(0, 200) });
+    }
+    res.json(data);
   } catch (err) {
+    console.error('Fetch error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
