@@ -87,7 +87,7 @@ Rules: PropertyTax=annual $. Rents=monthly $ per unit. Percentages as numbers (2
 app.post('/analyze', async (req, res) => {
   try {
     const response = await fetch(
-      'https://script.google.com/macros/s/AKfycbzH3A8bv1jaTA089o6aP07_v8RmQs3-RCr-Nw62Hs5DjptO4018Q9fre4TT5CxWRij-/exec',
+      'https://script.google.com/macros/s/AKfycbyy9SrBK9JW2M2lBbCKJmVdDMpulRnZYL_uinL2LHEw9b5UoUeAVAi3MmnYNXR7mIcH/exec',
       {
         method: 'POST',
         redirect: 'follow',
