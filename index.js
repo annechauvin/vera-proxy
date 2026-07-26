@@ -12,28 +12,63 @@ app.use((req, res, next) => {
   next();
 });
 
-// Extract listing data using Claude
-app.post('/extract', async (req, res) => {
-  try {
-    const { text } = req.body;
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 2048,
-        system: `You are a data extraction engine for a Canadian real estate investment analysis tool.
-Extract fields from the user text and return ONLY valid JSON. DO NOT calculate. DO NOT guess. DO NOT invent numbers.
-If a field is not explicitly in the text, set it to null.
-Return this exact JSON:
+const EXTRACT_SYSTEM = `You are a smart real estate data extraction engine for a Canadian rental property investment tool.
+
+The user will paste a property listing, realtor notes, or any free-form text. Your job is to extract data AND intelligently infer facts from the language used.
+
+SMART READING RULES — infer from context:
+
+UNIT COUNT:
+- "single", "single family", "single-family", "SFH", "bungalow", "house", "cottage", "1 unit", "one unit" = 1
+- "duplex", "semi-detached", "2 unit", "two unit", "up/down", "upper and lower" = 2  
+- "triplex", "3 unit", "three unit" = 3
+- "fourplex", "quadplex", "4 unit", "four unit" = 4
+- If unit types are listed, count them
+
+CONDITION / RENOVATION:
+- If listing uses: "potential", "savvy investor", "as-is", "handyman", "needs work", "fixer", "estate sale", "priced to sell", "opportunity", "great bones", "TLC", "sweat equity" → set RenovationEstimate to a non-zero value (use 15000 as a conservative placeholder)
+- If listing uses: "turnkey", "move-in ready", "renovated", "updated", "pristine", "immaculate" → RenovationEstimate = 0
+
+UTILITIES / EXPENSES:
+- "paid by tenants", "tenant pays", "tenants pay", "hydro included by tenant" → set that utility to 0
+- "included", "owner pays", "landlord pays" → note that expense as owner-paid (keep as null for user to fill)
+- "heat included", "all utilities included" → Utilities_Heat = 0 wait for user to confirm
+
+RENTS:
+- "$X/mo", "$X per month", "rents for $X", "generating $X", "income of $X/month" → extract as rent
+- "gross income $X/yr" → divide by 12 and by units for monthly rent per unit
+- "potential rent", "market rent" → still extract as AsIsRent
+
+PROPERTY TAX:
+- "tax $X", "taxes $X/yr", "municipal $X", "property tax $X" → extract annual amount
+- If given monthly, multiply by 12
+
+INSURANCE:
+- "insurance $X", "insured for $X/yr" → annual amount
+
+FINANCING (extract if mentioned):
+- "X% down", "X% downpayment" → DownpaymentPercentage as whole number (20 for 20%)
+- "X% rate", "X% interest", "at X%" → InterestRate as whole number
+- "X year amort", "X yr amortization" → AmortizationPeriod
+
+USAGE:
+- "investment", "rental", "fully rented", "income property", "tenant occupied" = "Full rental"
+- "owner occupied", "live in one unit", "owner-occupied", "house hack" = "Owner-occupied duplex" or "Owner-occupied triplex"
+- Default to "Full rental"
+
+FINAL RULES (always apply):
+- PropertyTax: annual dollars. If monthly multiply by 12.
+- All rents: monthly dollars per unit.
+- Percentages as whole numbers: 20 for 20%, 5 for 5%.
+- duplex=2, triplex=3, fourplex=4. Max 4 units.
+- NEVER invent numbers not explicitly in the text.
+- If unsure, set to null — never guess.
+
+RETURN only this exact JSON, no markdown, no explanation:
 {
   "PropertyAddress": string or null,
   "PropertyNeighborhood": string or null,
-  "ListingDescription": string or null,
+  "ListingDescription": "copy full text here",
   "PropertyAskingPrice": number or null,
   "PropertyPuchasePrice": number or null,
   "NumberofUnits": number or null,
@@ -67,8 +102,23 @@ Return this exact JSON:
   "RenovationEstimate": number or null,
   "GrowthYOYPercentageYr1": number or null,
   "AppreciationPercentageYr1": number or null
-}
-Rules: PropertyTax=annual $. Rents=monthly $ per unit. Percentages as numbers (20 for 20%). duplex=2, triplex=3, fourplex=4. NEVER invent numbers.`,
+}`;
+
+// Extract listing data using Claude
+app.post('/extract', async (req, res) => {
+  try {
+    const { text } = req.body;
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        system: EXTRACT_SYSTEM,
         messages: [{ role: 'user', content: text }]
       })
     });
@@ -79,6 +129,7 @@ Rules: PropertyTax=annual $. Rents=monthly $ per unit. Percentages as numbers (2
     if (!m) throw new Error('Could not extract data from listing');
     res.json(JSON.parse(m[0]));
   } catch (err) {
+    console.error('Extract error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -96,17 +147,10 @@ app.post('/analyze', async (req, res) => {
       }
     );
     const text = await response.text();
-    console.log('Apps Script response:', text.slice(0, 500));
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch(e) {
-      console.error('Parse error:', e.message, 'Raw:', text.slice(0, 200));
-      return res.status(500).json({ error: 'Apps Script returned invalid JSON: ' + text.slice(0, 200) });
-    }
-    res.json(data);
+    console.log('Apps Script response:', text.slice(0, 300));
+    res.json(JSON.parse(text));
   } catch (err) {
-    console.error('Fetch error:', err.message);
+    console.error('Analyze error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
