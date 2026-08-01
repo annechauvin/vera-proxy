@@ -1,8 +1,10 @@
 const express = require('express');
 const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
 const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -10,6 +12,59 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
+});
+
+// ── KNOWLEDGE BASE HELPERS (NEW) ──
+const KB_DIR = path.join(__dirname, 'knowledge');
+if (!fs.existsSync(KB_DIR)) fs.mkdirSync(KB_DIR);
+
+function readKnowledge(category) {
+  const file = path.join(KB_DIR, category + '.txt');
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+}
+
+// ── NEW: Save knowledge by category ──
+app.post('/knowledge', (req, res) => {
+  try {
+    const { category, text, password } = req.body;
+    if (password !== process.env.ADMIN_PASSWORD) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (!category || !text) {
+      return res.status(400).json({ error: 'category and text required' });
+    }
+    const safe = category.replace(/[^a-zA-Z0-9-_]/g, '');
+    fs.writeFileSync(path.join(KB_DIR, safe + '.txt'), text, 'utf8');
+    res.json({ success: true, category: safe });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── NEW: Read knowledge by category ──
+app.get('/knowledge/:category', (req, res) => {
+  try {
+    const safe = req.params.category.replace(/[^a-zA-Z0-9-_]/g, '');
+    const text = readKnowledge(safe);
+    res.json({ category: safe, text });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── NEW: List all knowledge categories ──
+app.get('/knowledge', (req, res) => {
+  try {
+    const files = fs.existsSync(KB_DIR)
+      ? fs.readdirSync(KB_DIR).filter(f => f.endsWith('.txt')).map(f => ({
+          category: f.replace('.txt', ''),
+          size: fs.statSync(path.join(KB_DIR, f)).size
+        }))
+      : [];
+    res.json({ categories: files });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const EXTRACT_SYSTEM = `You are a smart real estate data extraction engine for a Canadian rental property investment tool.
@@ -108,6 +163,13 @@ RETURN only this exact JSON, no markdown, no explanation:
 app.post('/extract', async (req, res) => {
   try {
     const { text } = req.body;
+
+    // ── NEW: Load property-analysis knowledge base ──
+    const knowledge = readKnowledge('property-analysis');
+    const systemPrompt = knowledge
+      ? EXTRACT_SYSTEM + '\n\n=== VERA KNOWLEDGE BASE ===\n' + knowledge
+      : EXTRACT_SYSTEM;
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -118,7 +180,7 @@ app.post('/extract', async (req, res) => {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 2048,
-        system: EXTRACT_SYSTEM,
+        system: systemPrompt,
         messages: [{ role: 'user', content: text }]
       })
     });
