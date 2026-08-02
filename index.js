@@ -217,6 +217,78 @@ app.post('/analyze', async (req, res) => {
   }
 });
 
+// ── NEW: Extract text from PDF for admin knowledge base ──
+app.post('/extract-pdf', async (req, res) => {
+  try {
+    const { pdf, password } = req.body;
+    if (password !== process.env.ADMIN_PASSWORD) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              source: { type: 'base64', media_type: 'application/pdf', data: pdf }
+            },
+            {
+              type: 'text',
+              text: 'Extract all the text from this document. Return only the raw text content, no formatting, no commentary.'
+            }
+          ]
+        }]
+      })
+    });
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
+    const text = data.content?.find(b => b.type === 'text')?.text || '';
+    res.json({ text });
+  } catch (err) {
+    console.error('PDF extract error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── NEW: Generate VERA insights from property data ──
+app.post('/insights', async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        system: 'You are VERA, a real estate investment assistant. Return only valid JSON as requested. No markdown, no explanation.',
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
+    const txt = data.content?.find(b => b.type === 'text')?.text || '';
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('Could not parse insights response');
+    res.json(JSON.parse(m[0]));
+  } catch (err) {
+    console.error('Insights error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/', (req, res) => res.json({ status: 'VERA proxy running' }));
 
 app.listen(process.env.PORT || 3000, () => console.log('Proxy started'));
