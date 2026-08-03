@@ -259,10 +259,36 @@ app.post('/extract-pdf', async (req, res) => {
   }
 });
 
+// ── NEW: Fetch knowledge from Google Sheet ──
+async function fetchKnowledge(category) {
+  try {
+    const url = 'https://script.google.com/macros/s/AKfycbyy9SrBK9JW2M2lBbCKJmVdDMpulRnZYL_uinL2LHEw9b5UoUeAVAi3MmnYNXR7mIcH/exec?action=getKnowledge&category=' + encodeURIComponent(category);
+    const resp = await fetch(url, { redirect: 'follow' });
+    const data = await resp.json();
+    return data.text || '';
+  } catch (err) {
+    console.error('Knowledge fetch error:', err.message);
+    return '';
+  }
+}
+
 // ── NEW: Generate VERA insights from property data ──
 app.post('/insights', async (req, res) => {
   try {
     const { prompt } = req.body;
+    // Fetch relevant knowledge from Google Sheet (with timeout so it doesn't block)
+    const category = req.body.category || 'Level 1 Property Analysis';
+    let knowledge = '';
+    try {
+      const knowledgePromise = fetchKnowledge(category);
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(''), 8000));
+      knowledge = await Promise.race([knowledgePromise, timeoutPromise]);
+      if (knowledge) console.log('Knowledge loaded:', knowledge.length, 'chars for', category);
+      else console.log('Knowledge not available or timed out for', category);
+    } catch(kErr) {
+      console.log('Knowledge fetch failed:', kErr.message);
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -273,7 +299,7 @@ app.post('/insights', async (req, res) => {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 2048,
-        system: 'You are VERA, a real estate investment assistant. Return only valid JSON as requested. No markdown, no explanation.',
+        system: 'You are VERA, a real estate investment assistant trained by Anne Chauvin, a licensed mortgage agent specializing in Canadian multifamily properties. Return only valid JSON as requested. No markdown, no explanation.' + (knowledge ? '\n\n=== ANNE CHAUVIN KNOWLEDGE BASE ===\n' + knowledge : ''),
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -285,6 +311,23 @@ app.post('/insights', async (req, res) => {
     res.json(JSON.parse(m[0]));
   } catch (err) {
     console.error('Insights error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Get user analyses from Apps Script ──
+app.get('/get-analyses', async (req, res) => {
+  try {
+    const email = req.query.email || '';
+    const response = await fetch(
+      'https://script.google.com/macros/s/AKfycbyy9SrBK9JW2M2lBbCKJmVdDMpulRnZYL_uinL2LHEw9b5UoUeAVAi3MmnYNXR7mIcH/exec?action=getAnalyses&email=' + encodeURIComponent(email),
+      { redirect: 'follow' }
+    );
+    const text = await response.text();
+    const data = JSON.parse(text);
+    res.json(data);
+  } catch (err) {
+    console.error('get-analyses error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
