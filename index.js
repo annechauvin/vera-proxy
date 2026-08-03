@@ -324,7 +324,33 @@ app.get('/get-analyses', async (req, res) => {
       { redirect: 'follow' }
     );
     const text = await response.text();
-    const data = JSON.parse(text);
+    const raw = JSON.parse(text);
+    // Map sheet columns to card fields
+    const data = raw.map(r => {
+      const units = Number(r.units) || 1;
+      const capRate = Number(r.capRate) || 0;
+      const capPct = capRate > 1 ? capRate * 100 : capRate * 100;
+      const totalROI = Number(r.totalROI) || 0;
+      const totalROIPct = totalROI > 1 ? totalROI * 100 : totalROI * 100;
+      return {
+        addr: r.addr || '',
+        city: r.city || '',
+        neighbourhood: r.neighbourhood || '',
+        date: r.date || '',
+        units: units,
+        type: units === 1 ? 'Single' : units === 2 ? 'Duplex' : units === 3 ? 'Triplex' : 'Fourplex',
+        asking: Number(r.asking) || 0,
+        capRate: capPct,
+        cashflow: Number(r.cashflow) || 0,
+        coc: Number(r.coc) || 0,
+        totalROI: totalROIPct,
+        cashToClose: Number(r.cashToClose) || 0,
+        verdict: capPct >= 5 ? 'turnkey' : capPct >= 3 ? 'brrrr' : 'nogo',
+        confidence: 75,
+        missing: [],
+        pdfUrl: r.pdfUrl || ''
+      };
+    });
     res.json(data);
   } catch (err) {
     console.error('get-analyses error:', err.message);
