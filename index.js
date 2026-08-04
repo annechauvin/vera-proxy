@@ -200,7 +200,7 @@ app.post('/extract', async (req, res) => {
 app.post('/analyze', async (req, res) => {
   try {
     const response = await fetch(
-      'https://script.google.com/macros/s/AKfycbyy9SrBK9JW2M2lBbCKJmVdDMpulRnZYL_uinL2LHEw9b5UoUeAVAi3MmnYNXR7mIcH/exec',
+      'https://script.google.com/macros/s/AKfycbx8GaIdXWbDkTrqlcgM5kvGX_iMIYfKxl8Z8udZAV9n_kDDYZo9QHPiC99M8jAdEdfW/exec',
       {
         method: 'POST',
         redirect: 'follow',
@@ -262,7 +262,7 @@ app.post('/extract-pdf', async (req, res) => {
 // ── NEW: Fetch knowledge from Google Sheet ──
 async function fetchKnowledge(category) {
   try {
-    const url = 'https://script.google.com/macros/s/AKfycbyy9SrBK9JW2M2lBbCKJmVdDMpulRnZYL_uinL2LHEw9b5UoUeAVAi3MmnYNXR7mIcH/exec?action=getKnowledge&category=' + encodeURIComponent(category);
+    const url = 'https://script.google.com/macros/s/AKfycbx8GaIdXWbDkTrqlcgM5kvGX_iMIYfKxl8Z8udZAV9n_kDDYZo9QHPiC99M8jAdEdfW/exec?action=getKnowledge&category=' + encodeURIComponent(category);
     const resp = await fetch(url, { redirect: 'follow' });
     const data = await resp.json();
     return data.text || '';
@@ -320,7 +320,7 @@ app.get('/get-analyses', async (req, res) => {
   try {
     const email = req.query.email || '';
     const response = await fetch(
-      'https://script.google.com/macros/s/AKfycbyy9SrBK9JW2M2lBbCKJmVdDMpulRnZYL_uinL2LHEw9b5UoUeAVAi3MmnYNXR7mIcH/exec?action=getAnalyses&email=' + encodeURIComponent(email),
+      'https://script.google.com/macros/s/AKfycbx8GaIdXWbDkTrqlcgM5kvGX_iMIYfKxl8Z8udZAV9n_kDDYZo9QHPiC99M8jAdEdfW/exec?action=getAnalyses&email=' + encodeURIComponent(email),
       { redirect: 'follow' }
     );
     const text = await response.text();
@@ -354,6 +354,31 @@ app.get('/get-analyses', async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error('get-analyses error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── TEST: Fetch OneHome listing ──
+app.get('/fetch-listing', async (req, res) => {
+  try {
+    const url = req.query.url;
+    if (!url) return res.status(400).json({ error: 'url required' });
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-CA,en;q=0.9'
+      }
+    });
+    const text = await response.text();
+    console.log('OneHome fetch status:', response.status, 'length:', text.length);
+    res.json({ 
+      status: response.status, 
+      length: text.length,
+      preview: text.substring(0, 500),
+      hasContent: text.includes('289,000') || text.includes('Douglas') || text.includes('Carmarthen') || text.includes('Kennedy')
+    });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
