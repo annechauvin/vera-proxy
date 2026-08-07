@@ -343,5 +343,76 @@ app.get('/fetch-listing', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Property search endpoints ──
+app.post('/save-search', async (req, res) => {
+  try {
+    const { email, city, propertyType, maxPrice } = req.body;
+    const url = APPS_URL + '?action=saveSearch&email=' + encodeURIComponent(email) +
+      '&city=' + encodeURIComponent(city) +
+      '&propertyType=' + encodeURIComponent(propertyType) +
+      '&maxPrice=' + encodeURIComponent(maxPrice || '');
+    const resp = await fetch(url, { redirect: 'follow' });
+    const data = await resp.json();
+    res.json(data);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/get-listings', async (req, res) => {
+  try {
+    const email = req.query.email || '';
+    const url = APPS_URL + '?action=getListings&email=' + encodeURIComponent(email);
+    const resp = await fetch(url, { redirect: 'follow' });
+    const data = await resp.json();
+    res.json(data);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/fetch-now', async (req, res) => {
+  try {
+    const url = APPS_URL + '?action=fetchNow';
+    fetch(url, { redirect: 'follow' }); // fire and forget
+    res.json({ success: true, message: 'Fetching listings in background...' });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/mark-viewed', async (req, res) => {
+  try {
+    const { email, listingUrl } = req.body;
+    const url = APPS_URL + '?action=markViewed&email=' + encodeURIComponent(email) +
+      '&url=' + encodeURIComponent(listingUrl);
+    await fetch(url, { redirect: 'follow' });
+    res.json({ success: true });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Fetch full listing page ──
+app.post('/fetch-listing-text', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'url required' });
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-CA,en;q=0.9'
+      }
+    });
+    const html = await resp.text();
+    // Extract readable text - remove HTML tags
+    const text = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 8000);
+    res.json({ text, url });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/', (req, res) => res.json({ status: 'VERA proxy running' }));
 app.listen(process.env.PORT || 3000, () => console.log('Proxy started'));
