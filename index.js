@@ -211,27 +211,37 @@ app.post('/analyze', async (req, res) => {
 // ── VERA Insights + Chat ──
 app.post('/insights', async (req, res) => {
   try {
-    const { prompt, category } = req.body;
-    const isChat = category === 'all';
+    const { prompt, category, mode } = req.body;
+    const isChat = mode === 'chat'; // chat mode set explicitly by client
 
-    // Fetch knowledge - for chat fetch all, for insights fetch specific category
+    // Fetch knowledge
     let knowledge = '';
     try {
-      const cat = isChat ? 'all' : (category || 'Level 1 Property Analysis');
+      const cat = category || 'Analyse a property';
       knowledge = await Promise.race([
         fetchKnowledge(cat),
-        new Promise(resolve => setTimeout(() => resolve(''), 8000))
+        new Promise(resolve => setTimeout(() => resolve(''), 15000))
       ]) || '';
       if (knowledge) console.log('Knowledge loaded:', knowledge.length, 'chars for', cat);
+      else console.log('No knowledge loaded for', cat);
     } catch(kErr) { knowledge = ''; }
 
-    // For chat: require knowledge base - never make things up
+    // For chat without knowledge: decline politely
     if (isChat && !knowledge) {
       return res.json({ answer: 'I am not able to access my knowledge base right now. Please try again in a moment.' });
     }
 
     const sysPrompt = isChat
-      ? 'You are VERA, a real estate investment assistant trained by Anne Chauvin, licensed mortgage agent specializing in Canadian multifamily properties. Answer ONLY using the knowledge base provided. If the answer is not in the knowledge base, say so clearly. Be specific and practical. Plain conversational text only.\n\n=== ANNE CHAUVIN KNOWLEDGE BASE ===\n' + knowledge
+      ? `You are VERA, Anne Chauvin's real estate investment assistant. Anne is a licensed mortgage agent (FSRA #M25000164) specializing in Canadian multifamily properties in Saint John, NB.
+
+You have absorbed Anne's entire investor training program. This is your brain — everything you know comes from it. You speak naturally and conversationally, exactly the way Anne would advise a student. You give specific, practical advice grounded in the program content.
+
+When a user shares property data, you analyse it through Anne's lens and give them real guidance — the same way Anne would in a coaching call.
+
+You never say "I don't know" unless the topic is completely outside real estate investing. You never say "consult a professional" — you ARE the professional voice of Anne's program.
+
+ANNE'S PROGRAM KNOWLEDGE:
+${knowledge}`
       : 'You are VERA, a real estate investment assistant trained by Anne Chauvin. Return only valid JSON as requested. No markdown, no explanation.' + (knowledge ? '\n\n=== ANNE CHAUVIN KNOWLEDGE BASE ===\n' + knowledge : '');
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -243,7 +253,7 @@ app.post('/insights', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2048,
+        max_tokens: 1024,
         system: sysPrompt,
         messages: [{ role: 'user', content: prompt }]
       })
@@ -264,6 +274,7 @@ app.post('/insights', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // ── Get user analyses ──
 app.get('/get-analyses', async (req, res) => {
