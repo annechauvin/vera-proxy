@@ -212,7 +212,8 @@ app.post('/analyze', async (req, res) => {
 app.post('/insights', async (req, res) => {
   try {
     const { prompt, category, mode } = req.body;
-    const isChat = mode === 'chat'; // chat mode set explicitly by client
+    const isChat = mode === 'chat'; // chat returns plain text
+    const isMarket = mode === 'market'; // market returns JSON
 
     // Fetch knowledge
     let knowledge = '';
@@ -266,7 +267,11 @@ ${knowledge}`
       res.json({ answer: txt });
     } else {
       const m = txt.match(/\{[\s\S]*\}/);
-      if (!m) throw new Error('Could not parse insights response');
+      if (!m) {
+        // Return as plain answer if no JSON found
+        res.json({ answer: txt });
+        return;
+      }
       res.json(JSON.parse(m[0]));
     }
   } catch (err) {
@@ -533,6 +538,18 @@ app.get('/search-kijiji', async (req, res) => {
     console.error('Kijiji search error:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Get knowledge by category ──
+app.get('/get-knowledge', async (req, res) => {
+  try {
+    const category = req.query.category || 'Find a Market';
+    const knowledge = await Promise.race([
+      fetchKnowledge(category),
+      new Promise(resolve => setTimeout(() => resolve(''), 12000))
+    ]) || '';
+    res.json({ text: knowledge, chars: knowledge.length });
+  } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/', (req, res) => res.json({ status: 'VERA proxy running' }));
