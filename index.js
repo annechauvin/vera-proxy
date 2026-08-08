@@ -253,7 +253,7 @@ Be conversational and specific. No bullet points unless it helps clarity. No def
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 8192,
+        max_tokens: 4096,
         system: sysPrompt,
         messages: [{ role: 'user', content: prompt }]
       })
@@ -564,7 +564,7 @@ app.post('/build-team', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 8192,
+        max_tokens: 4096,
         system: 'You are a Canadian real estate investment team researcher. You know the Canadian real estate market well. Generate realistic, plausible professional options for investors. Return only valid JSON. No markdown, no explanation.',
         messages: [{ role: 'user', content: prompt }]
       })
