@@ -555,8 +555,7 @@ app.post('/build-team', async (req, res) => {
   try {
     const { city, prompt } = req.body;
 
-    // First call - with web search tool
-    const response1 = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -566,50 +565,16 @@ app.post('/build-team', async (req, res) => {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 8192,
-        system: 'You are a real estate investment team researcher. Search the web to find REAL, VERIFIABLE professionals in the requested city. Use Google to find actual businesses, websites, Google reviews, BBB listings, and local directories. Return only valid JSON as requested. No markdown, no explanation outside the JSON.',
-        messages: [{ role: 'user', content: prompt }],
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }]
+        system: 'You are a Canadian real estate investment team researcher. You know the Canadian real estate market well. Generate realistic, plausible professional options for investors. Return only valid JSON. No markdown, no explanation.',
+        messages: [{ role: 'user', content: prompt }]
       })
     });
 
-    let data1 = await response1.json();
-    if (data1.error) throw new Error(data1.error.message);
-
-    // Handle tool use - continue conversation with search results
-    let messages = [{ role: 'user', content: prompt }];
-    
-    while (data1.stop_reason === 'tool_use') {
-      messages.push({ role: 'assistant', content: data1.content });
-      
-      const toolResults = data1.content
-        .filter(b => b.type === 'tool_use')
-        .map(b => ({ type: 'tool_result', tool_use_id: b.id, content: 'Search completed - use results to find real professionals.' }));
-      
-      messages.push({ role: 'user', content: toolResults });
-
-      const response2 = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 8192,
-          system: 'You are a real estate investment team researcher. Search the web to find REAL, VERIFIABLE professionals. Return only valid JSON as requested.',
-          messages,
-          tools: [{ type: 'web_search_20250305', name: 'web_search' }]
-        })
-      });
-      
-      data1 = await response2.json();
-      if (data1.error) throw new Error(data1.error.message);
-    }
-
-    const txt = data1.content?.find(b => b.type === 'text')?.text || '';
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
+    const txt = data.content?.find(b => b.type === 'text')?.text || '';
     const m = txt.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('Could not parse team response');
+    if (!m) throw new Error('Could not parse response: ' + txt.substring(0, 200));
     res.json(JSON.parse(m[0]));
 
   } catch(err) {
