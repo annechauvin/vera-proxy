@@ -432,5 +432,108 @@ app.post('/save-listing', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Search Kijiji listings ──
+app.get('/search-kijiji', async (req, res) => {
+  try {
+    const { region, type, maxPrice } = req.query;
+    const types = (type === 'duplex-triplex' || type === 'all') ? ['duplex', 'triplex'] : [type || 'duplex'];
+    
+    const LOCATION_IDS = {
+      'new-brunswick': 'l9059', 'nova-scotia': 'l9062', 'prince-edward-island': 'l9063',
+      'newfoundland': 'l9060', 'city-of-toronto': 'l1700273', 'gta-greater-toronto-area': 'l1700272',
+      'mississauga-peel-region': 'l1700276', 'hamilton': 'l80014', 'ottawa': 'l1700185',
+      'london': 'l1700214', 'kitchener-waterloo': 'l1700212', 'windsor-ontario': 'l1700255',
+      'kingston-ontario': 'l1700209', 'ontario': 'l9004', 'montreal-nord-du-montreal': 'l1700281',
+      'quebec-city': 'l1700282', 'quebec': 'l9055', 'calgary': 'l1700199', 'edmonton': 'l1700203',
+      'alberta': 'l9003', 'vancouver': 'l1700227', 'victoria-bc': 'l1700228', 'kelowna': 'l1700222',
+      'british-columbia': 'l9007', 'winnipeg': 'l1700192', 'manitoba': 'l9008',
+      'saskatoon': 'l1700239', 'regina': 'l1700238', 'saskatchewan': 'l9056', 'canada': 'l0'
+    };
+    
+    const locationId = LOCATION_IDS[region] || 'l0';
+    const maxPriceNum = maxPrice ? parseInt(maxPrice) : 0;
+    let allListings = [];
+    
+    for (const t of types) {
+      const url = `https://www.kijiji.ca/b-house-for-sale/${region}/${t}/k0c35${locationId}`;
+      console.log('Fetching Kijiji:', url);
+      
+      const resp = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'en-CA,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br'
+        }
+      });
+      
+      const html = await resp.text();
+      console.log('Response status:', resp.status, 'HTML length:', html.length);
+      
+      // Extract listings using regex
+      const linkRe = /href="(\/v-house-for-sale\/[^"]+)"/g;
+      const priceRe = /\$\s*([0-9,]+)(?:\.00)?/g;
+      const titleRe = /"title"\s*:\s*"([^"]+)"/g;
+      const descRe = /"description"\s*:\s*"([^"]+)"/g;
+      
+      const urls = new Set();
+      const listings = [];
+      let m;
+      
+      // Get all listing URLs
+      while ((m = linkRe.exec(html)) !== null) {
+        const listingUrl = 'https://www.kijiji.ca' + m[1];
+        if (!urls.has(listingUrl) && !m[1].includes('?') && m[1].split('/').length >= 5) {
+          urls.add(listingUrl);
+        }
+      }
+      
+      // Get prices
+      const prices = [];
+      while ((m = priceRe.exec(html)) !== null) {
+        const p = parseInt(m[1].replace(/,/g, ''));
+        if (p >= 50000) prices.push(p);
+      }
+      
+      // Get titles from JSON-LD
+      const titles = [];
+      while ((m = titleRe.exec(html)) !== null) {
+        if (m[1].length > 10) titles.push(m[1]);
+      }
+      
+      // Get descriptions
+      const descs = [];
+      while ((m = descRe.exec(html)) !== null) {
+        if (m[1].length > 20) descs.push(m[1].substring(0, 200));
+      }
+      
+      let i = 0;
+      for (const listingUrl of urls) {
+        const price = prices[i] || 0;
+        if (maxPriceNum > 0 && price > maxPriceNum) { i++; continue; }
+        
+        allListings.push({
+          url: listingUrl,
+          price: price,
+          addr: titles[i] || listingUrl.split('/').slice(-2, -1)[0].replace(/-/g, ' '),
+          type: t,
+          city: region,
+          description: descs[i] || '',
+          dateFound: new Date().toLocaleDateString('en-CA', {month:'short', day:'numeric', year:'numeric'}),
+          status: 'New'
+        });
+        
+        if (++i >= 20) break;
+      }
+    }
+    
+    console.log('Total listings found:', allListings.length);
+    res.json(allListings);
+  } catch(err) {
+    console.error('Kijiji search error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/', (req, res) => res.json({ status: 'VERA proxy running' }));
 app.listen(process.env.PORT || 3000, () => console.log('Proxy started'));
