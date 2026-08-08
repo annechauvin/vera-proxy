@@ -564,8 +564,8 @@ app.post('/build-team', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
-        system: 'You are a Canadian real estate investment team researcher. You know the Canadian real estate market well. Generate realistic, plausible professional options for investors. Return only valid JSON. No markdown, no explanation.',
+        max_tokens: 2048,
+        system: 'You are a Canadian real estate investment team researcher. Return only valid JSON. No markdown. Be extremely concise — max 50 chars per field.',
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -574,7 +574,7 @@ app.post('/build-team', async (req, res) => {
     if (data.error) throw new Error(data.error.message);
     const txt = data.content?.find(b => b.type === 'text')?.text || '';
     const m = txt.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('Could not parse response: ' + txt.substring(0, 200));
+    if (!m) throw new Error('Could not parse response');
     res.json(JSON.parse(m[0]));
 
   } catch(err) {
