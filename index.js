@@ -254,13 +254,46 @@ ${knowledge}`
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
+        max_tokens: 2048,
         system: sysPrompt,
-        messages: [{ role: 'user', content: prompt }]
+        messages: [{ role: 'user', content: prompt }],
+        tools: isMarket ? [{ type: 'web_search_20250305', name: 'web_search' }] : undefined
       })
     });
-    const data = await response.json();
+    let data = await response.json();
     if (data.error) throw new Error(data.error.message);
+
+    // Handle tool use (web search) - do follow-up call
+    if (data.stop_reason === 'tool_use' && isMarket) {
+      const toolUseBlocks = data.content.filter(b => b.type === 'tool_use');
+      const toolResults = toolUseBlocks.map(b => ({
+        type: 'tool_result',
+        tool_use_id: b.id,
+        content: 'Search completed.'
+      }));
+
+      const resp2 = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 2048,
+          system: sysPrompt,
+          messages: [
+            { role: 'user', content: prompt },
+            { role: 'assistant', content: data.content },
+            { role: 'user', content: toolResults }
+          ]
+        })
+      });
+      data = await resp2.json();
+      if (data.error) throw new Error(data.error.message);
+    }
+
     const txt = data.content?.find(b => b.type === 'text')?.text || '';
 
     if (isChat) {
@@ -268,7 +301,6 @@ ${knowledge}`
     } else {
       const m = txt.match(/\{[\s\S]*\}/);
       if (!m) {
-        // Return as plain answer if no JSON found
         res.json({ answer: txt });
         return;
       }
