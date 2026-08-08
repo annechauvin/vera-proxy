@@ -254,7 +254,7 @@ ${knowledge}`
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
+        max_tokens: 8192,
         system: sysPrompt,
         messages: [{ role: 'user', content: prompt }]
       })
