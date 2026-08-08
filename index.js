@@ -414,5 +414,23 @@ app.post('/fetch-listing-text', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Save single listing ──
+app.post('/save-listing', async (req, res) => {
+  try {
+    const { email, listing } = req.body;
+    const url = APPS_URL + '?action=saveListing' +
+      '&email=' + encodeURIComponent(email) +
+      '&addr=' + encodeURIComponent(listing.addr || '') +
+      '&price=' + encodeURIComponent(listing.price || 0) +
+      '&type=' + encodeURIComponent(listing.type || '') +
+      '&city=' + encodeURIComponent(listing.city || '') +
+      '&description=' + encodeURIComponent((listing.description || '').substring(0, 500)) +
+      '&listingUrl=' + encodeURIComponent(listing.url || '');
+    const resp = await fetch(url, { redirect: 'follow' });
+    const data = await resp.json();
+    res.json(data);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/', (req, res) => res.json({ status: 'VERA proxy running' }));
 app.listen(process.env.PORT || 3000, () => console.log('Proxy started'));
