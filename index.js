@@ -564,8 +564,8 @@ app.post('/build-team', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2048,
-        system: 'You are a Canadian real estate investment team researcher. Return only valid JSON. No markdown. Be extremely concise — max 50 chars per field.',
+        max_tokens: 4096,
+        system: 'You are a Canadian real estate investment team researcher. Return only valid JSON. No markdown. Keep ALL text values under 80 chars.',
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -573,9 +573,23 @@ app.post('/build-team', async (req, res) => {
     const data = await response.json();
     if (data.error) throw new Error(data.error.message);
     const txt = data.content?.find(b => b.type === 'text')?.text || '';
-    const m = txt.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('Could not parse response');
-    res.json(JSON.parse(m[0]));
+    const m = txt.match(/\{[\s\S]*/);
+    if (!m) throw new Error('No JSON found');
+    let jsonStr = m[0];
+    // Remove trailing incomplete content
+    jsonStr = jsonStr.replace(/,\s*$/, '');
+    // Try to parse - if fails, try to close truncated JSON
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch(e) {
+      // Close any open arrays/objects
+      let depth = 0;
+      for (let ch of jsonStr) { if (ch==='{' || ch==='[') depth++; else if (ch==='}' || ch===']') depth--; }
+      for (let i=0; i<depth; i++) jsonStr += (i===depth-1?'}':']');
+      try { parsed = JSON.parse(jsonStr); } catch(e2) { throw new Error('JSON parse failed: ' + e2.message); }
+    }
+    res.json(parsed);
 
   } catch(err) {
     console.error('Build team error:', err.message);
