@@ -326,67 +326,44 @@ app.post('/mark-viewed', async (req, res) => {
 app.post('/build-team', async (req, res) => {
   try {
     const { city } = req.body;
-    const roles = ['Real Estate Agent','Mortgage Broker or Agent','Insurance Agent','Real Estate Lawyer','Home Inspector','Contractor','Property Manager'];
+    const roles = ['Real Estate Agent','Real Estate Lawyer','Home Inspector'];
     const allRoles = [];
 
     for (const role of roles) {
-      const prompt = `I am a real estate investor in ${city}, Canada. Give me 3 to 5 ${role} options who work with investment properties.
-
-For each, provide exactly:
-NAME: [name]
-YEARS: [years of experience]
-SPECIALIZATION: [e.g. investment properties, multi-family, BRRRR]
-CLIENTS: [investment clients per year]
-STRENGTHS: [key strength]
-AVAILABILITY: [response time]
-FEES: [fee structure]
-REVIEWS: [online presence or rating]
-RECOMMENDED: [yes or no]
----
-
-After the list add:
-BEST FOR NEW INVESTOR: [who and why]
-REFERRAL TIP: [how to get referrals from this type of professional]`;
-
+      const prompt = 'Search Google to find 3 to 5 real ' + role + ' professionals in ' + city + ', Canada who specialize in rental properties or real estate investment. For each find their actual phone number, email, and website from their business listing or website. Return JSON only: {"professionals":[{"name":"full name","company":"company name","phone":"phone number","email":"email address","website":"website url","specialization":"e.g. multifamily investment properties","strength":"key differentiator","years":"years experience","recommended":false}],"referral_tip":"how to get referrals from this type of professional","recommendation":"who is best for a new investor and why"}. Mark the best one recommended true.';
       try {
-        const r = await fetch('https://api.anthropic.com/v1/messages', {
+        // First call with web search
+        let r = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, system: 'You are a Canadian real estate team researcher. Follow the exact format. Plain text only.', messages: [{ role: 'user', content: prompt }] })
+          body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1200, system: 'Search the web to find REAL professionals. Return only valid JSON. No markdown.', messages: [{ role: 'user', content: prompt }], tools: [{ type: 'web_search_20250305', name: 'web_search' }] })
         });
-        const d = await r.json();
-        const txt = d.content?.find(b => b.type === 'text')?.text || '';
-        const professionals = [];
-        const blocks = txt.split('---').filter(b => b.trim());
-        for (const block of blocks) {
-          const pro = {};
-          for (const line of block.trim().split('\n')) {
-            const colonIdx = line.indexOf(':');
-            if (colonIdx === -1) continue;
-            const k = line.substring(0, colonIdx).trim().toUpperCase();
-            const v = line.substring(colonIdx + 1).trim();
-            if (k === 'NAME') pro.name = v;
-            else if (k === 'YEARS') pro.years = v;
-            else if (k === 'SPECIALIZATION') pro.specialization = v;
-            else if (k === 'CLIENTS') pro.investment_clients = v;
-            else if (k === 'STRENGTHS') pro.strengths = v;
-            else if (k === 'AVAILABILITY') pro.response_time = v;
-            else if (k === 'FEES') pro.fees = v;
-            else if (k === 'REVIEWS') pro.online = v;
-            else if (k === 'RECOMMENDED') pro.recommended = v.toLowerCase().startsWith('yes');
-          }
-          if (pro.name) professionals.push(pro);
+        let d = await r.json();
+        // If web search was used, do follow-up call
+        if (d.stop_reason === 'tool_use') {
+          const msgs = [{ role: 'user', content: prompt }, { role: 'assistant', content: d.content }];
+          const toolResults = d.content.filter(b => b.type === 'tool_use').map(b => ({ type: 'tool_result', tool_use_id: b.id, content: 'Search done.' }));
+          msgs.push({ role: 'user', content: toolResults });
+          r = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1200, system: 'Return only valid JSON. No markdown.', messages: msgs })
+          });
+          d = await r.json();
         }
-        const bestMatch = txt.match(/BEST FOR NEW INVESTOR[:\s]+([^\n]+)/i);
-        const referralMatch = txt.match(/REFERRAL TIP[:\s]+([^\n]+)/i);
-        allRoles.push({ role, search_tip: 'Search: investor ' + role + ' ' + city, recommendation: bestMatch ? bestMatch[1].trim() : '', referral_tip: referralMatch ? referralMatch[1].trim() : '', professionals: professionals.slice(0, 5) });
+        const txt = d.content?.find(b => b.type === 'text')?.text || '';
+        const m = txt.match(/\{[\s\S]*\}/);
+        if (m) {
+          const parsed = JSON.parse(m[0]);
+          allRoles.push({ role, professionals: parsed.professionals || [], referral_tip: parsed.referral_tip || '', recommendation: parsed.recommendation || '' });
+        } else {
+          allRoles.push({ role, professionals: [], referral_tip: '', recommendation: '' });
+        }
       } catch(e) {
-        allRoles.push({ role, search_tip: '', recommendation: '', referral_tip: '', professionals: [] });
+        allRoles.push({ role, professionals: [], referral_tip: '', recommendation: '' });
       }
     }
-
-    res.json({ city, roles: allRoles, top_picks_summary: 'Top picks selected for investment experience in ' + city + '.', referral_strategy: 'Start with your realtor and mortgage agent — they anchor your referral network.' });
-
+    res.json({ city, roles: allRoles });
   } catch(err) {
     console.error('Build team error:', err.message);
     res.status(500).json({ error: err.message });
