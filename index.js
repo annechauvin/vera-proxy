@@ -326,7 +326,7 @@ app.post('/mark-viewed', async (req, res) => {
 app.post('/build-team', async (req, res) => {
   try {
     const { city } = req.body;
-    const roles = ['Real Estate Agent','Real Estate Lawyer','Home Inspector'];
+    const roles = ['Real Estate Agent','Real Estate Lawyer','Home Inspector','Insurance Agent'];
     const allRoles = [];
 
     for (const role of roles) {
