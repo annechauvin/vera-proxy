@@ -137,22 +137,25 @@ app.post('/insights', async (req, res) => {
     const isChat = mode === 'chat';
 
     let knowledge = '';
-    try {
-      const cat = category || 'Analyse a property';
-      knowledge = await Promise.race([
-        fetchKnowledge(cat),
-        new Promise(resolve => setTimeout(() => resolve(''), 15000))
-      ]) || '';
-      if (knowledge) console.log('Knowledge loaded:', knowledge.length, 'chars for', cat);
-    } catch(kErr) { knowledge = ''; }
+    // Only load knowledge for chat mode - market research uses Claude's own knowledge
+    if (isChat) {
+      try {
+        const cat = category || 'Analyse a property';
+        knowledge = await Promise.race([
+          fetchKnowledge(cat),
+          new Promise(resolve => setTimeout(() => resolve(''), 15000))
+        ]) || '';
+        if (knowledge) console.log('Knowledge loaded:', knowledge.length, 'chars for', cat);
+      } catch(kErr) { knowledge = ''; }
 
-    if (isChat && !knowledge) {
-      return res.json({ answer: 'I am not able to access my knowledge base right now. Please try again in a moment.' });
+      if (!knowledge) {
+        return res.json({ answer: 'I am not able to access my knowledge base right now. Please try again in a moment.' });
+      }
     }
 
     const sysPrompt = isChat
       ? 'You are VERA, a Canadian multifamily real estate investment assistant. Answer ONLY using the knowledge base provided. Be specific and practical. Plain conversational text only.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '')
-      : 'You are VERA, a real estate investment assistant trained by Anne Chauvin. Answer in plain conversational text. Be specific and practical.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '');
+      : 'You are a Canadian real estate market research assistant. Use your knowledge of Canadian real estate data from CMHC, StatsCan, and MLS reports. Return ONLY valid JSON as instructed. No markdown, no explanation, no text outside the JSON object.';
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
