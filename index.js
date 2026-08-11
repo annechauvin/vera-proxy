@@ -146,8 +146,8 @@ app.post('/insights', async (req, res) => {
     }
 
     const sysPrompt = isChat
-      ? 'You are VERA, a Canadian multifamily real estate investment assistant. Answer ONLY using the knowledge base provided. Be specific and practical. Plain conversational text only.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '')
-      : 'You are VERA, a real estate investment assistant trained by Anne Chauvin. Answer in plain conversational text. Be specific and practical.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '');
+      ? 'You are VERA, a Canadian multifamily real estate investment assistant. Use the knowledge base as your primary source, but also use your own knowledge of Canadian cities, streets, and neighbourhoods to answer questions. Never deflect to Google Maps or suggest the user find someone else — just answer directly and specifically.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '')
+      : 'You are VERA, a real estate investment assistant. Answer in plain conversational text. Be specific and practical.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '');
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
