@@ -228,8 +228,7 @@ app.post('/save-listing', async (req, res) => {
       '&description=' + encodeURIComponent((listing.description || '').substring(0, 500)) +
       '&listingUrl=' + encodeURIComponent(listing.url || '');
     const resp = await fetch(url, { redirect: 'follow' });
-    const data = await resp.json();
-    res.json(data);
+    res.json(await resp.json());
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -322,50 +321,106 @@ app.post('/mark-viewed', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Build team ──
+// ── Build closing team ──
 app.post('/build-team', async (req, res) => {
   try {
     const { city } = req.body;
     const roles = ['Real Estate Agent','Real Estate Lawyer','Home Inspector','Insurance Agent'];
-    const allRoles = [];
 
-    for (const role of roles) {
-      const prompt = 'Search Google to find 3 to 5 real ' + role + ' professionals in ' + city + ', Canada who specialize in rental properties or real estate investment. For each find their actual phone number, email, and website from their business listing or website. Return JSON only: {"professionals":[{"name":"full name","company":"company name","phone":"phone number","email":"email address","website":"website url","specialization":"e.g. multifamily investment properties","strength":"key differentiator","years":"years experience","recommended":false}],"referral_tip":"how to get referrals from this type of professional","recommendation":"who is best for a new investor and why"}. Mark the best one recommended true.';
-      try {
-        // First call with web search
-        let r = await fetch('https://api.anthropic.com/v1/messages', {
+    async function searchRole(role) {
+      const prompt = 'Search Google to find 3 to 5 real ' + role + ' professionals in ' + city + ', Canada who specialize in rental properties or real estate investment. Find their actual phone number, email, and website. Return JSON only: {"professionals":[{"name":"","company":"","phone":"","email":"","website":"","specialization":"","strength":"","years":"","recommended":false}],"referral_tip":"","recommendation":""}. Mark the best one recommended true.';
+      const msgs = [{ role: 'user', content: prompt }];
+      let d;
+      let attempts = 0;
+      while (attempts < 4) {
+        attempts++;
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1200, system: 'Search the web to find REAL professionals. Return only valid JSON. No markdown.', messages: [{ role: 'user', content: prompt }], tools: [{ type: 'web_search_20250305', name: 'web_search' }] })
+          body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1200, system: 'Search the web then return only valid JSON. No markdown.', messages: msgs, tools: [{ type: 'web_search_20250305', name: 'web_search' }] })
         });
-        let d = await r.json();
-        // If web search was used, do follow-up call
-        if (d.stop_reason === 'tool_use') {
-          const msgs = [{ role: 'user', content: prompt }, { role: 'assistant', content: d.content }];
-          const toolResults = d.content.filter(b => b.type === 'tool_use').map(b => ({ type: 'tool_result', tool_use_id: b.id, content: 'Search done.' }));
-          msgs.push({ role: 'user', content: toolResults });
-          r = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-            body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1200, system: 'Return only valid JSON. No markdown.', messages: msgs })
-          });
-          d = await r.json();
-        }
-        const txt = d.content?.find(b => b.type === 'text')?.text || '';
-        const m = txt.match(/\{[\s\S]*\}/);
-        if (m) {
-          const parsed = JSON.parse(m[0]);
-          allRoles.push({ role, professionals: parsed.professionals || [], referral_tip: parsed.referral_tip || '', recommendation: parsed.recommendation || '' });
-        } else {
-          allRoles.push({ role, professionals: [], referral_tip: '', recommendation: '' });
-        }
-      } catch(e) {
-        allRoles.push({ role, professionals: [], referral_tip: '', recommendation: '' });
+        d = await r.json();
+        if (d.error) throw new Error(d.error.message);
+        if (d.stop_reason !== 'tool_use') break;
+        msgs.push({ role: 'assistant', content: d.content });
+        const toolResults = d.content.filter(b => b.type === 'tool_use').map(b => ({ type: 'tool_result', tool_use_id: b.id, content: 'Search completed.' }));
+        msgs.push({ role: 'user', content: toolResults });
       }
+      const txt = d.content?.find(b => b.type === 'text')?.text || '';
+      const m = txt.match(/\{[\s\S]*\}/);
+      if (!m) return { role, professionals: [], referral_tip: '', recommendation: '' };
+      const parsed = JSON.parse(m[0]);
+      return { role, professionals: parsed.professionals || [], referral_tip: parsed.referral_tip || '', recommendation: parsed.recommendation || '' };
     }
+
+    // Run all roles in parallel
+    const results = await Promise.allSettled(roles.map(role => searchRole(role)));
+    const allRoles = results.map((r, i) => r.status === 'fulfilled' ? r.value : { role: roles[i], professionals: [], referral_tip: '', recommendation: '' });
     res.json({ city, roles: allRoles });
+
   } catch(err) {
     console.error('Build team error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Save market to Search Criteria tab ──
+app.post('/save-market', async (req, res) => {
+  try {
+    const { email, city, province, neighbourhood, cls, condition } = req.body;
+    const url = APPS_URL + '?action=saveMarket' +
+      '&email=' + encodeURIComponent(email) +
+      '&city=' + encodeURIComponent(city || '') +
+      '&province=' + encodeURIComponent(province || '') +
+      '&neighbourhood=' + encodeURIComponent(neighbourhood || '') +
+      '&cls=' + encodeURIComponent(cls || '') +
+      '&condition=' + encodeURIComponent(condition || 'BRRRR');
+    const resp = await fetch(url, { redirect: 'follow' });
+    res.json(await resp.json());
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Get saved market from Search Criteria tab ──
+app.get('/get-market', async (req, res) => {
+  try {
+    const email = req.query.email || '';
+    const url = APPS_URL + '?action=getMarket&email=' + encodeURIComponent(email);
+    const resp = await fetch(url, { redirect: 'follow' });
+    res.json(await resp.json());
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Find realtors ──
+app.post('/find-realtors', async (req, res) => {
+  try {
+    const { city, neighbourhood, condition } = req.body;
+    const location = neighbourhood ? neighbourhood + ', ' + city : city;
+    const investmentFocus = condition === 'BRRRR' ? 'BRRRR strategy and value-add' : 'turnkey rental';
+    const prompt = 'I am a real estate investor looking to find an investor-friendly real estate agent in ' + location + ', Canada specializing in ' + investmentFocus + ' properties. Search Google to find 3 to 5 real options. For each include: name, company, years of experience, specialization (investment properties, multi-family, BRRRR), number of investment clients served last year, known strengths, average response time, fees/commission structure, online presence and reviews, phone, email, website. Also provide: who is best for a new investor and why, and strategies to get referrals. Return JSON only: {"realtors":[{"name":"","company":"","phone":"","email":"","website":"","years":"","specialization":"","investment_clients":"","strengths":"","response_time":"","fees":"","reviews":"","recommended":false}],"recommendation":"","referral_tip":""}. Mark the best one recommended true.';
+
+    const msgs = [{ role: 'user', content: prompt }];
+    let d;
+    let attempts = 0;
+    while (attempts < 4) {
+      attempts++;
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, system: 'Search the web then return only valid JSON. No markdown.', messages: msgs, tools: [{ type: 'web_search_20250305', name: 'web_search' }] })
+      });
+      d = await r.json();
+      if (d.error) throw new Error(d.error.message);
+      if (d.stop_reason !== 'tool_use') break;
+      msgs.push({ role: 'assistant', content: d.content });
+      const toolResults = d.content.filter(b => b.type === 'tool_use').map(b => ({ type: 'tool_result', tool_use_id: b.id, content: 'Search completed.' }));
+      msgs.push({ role: 'user', content: toolResults });
+    }
+    const txt = d.content?.find(b => b.type === 'text')?.text || '';
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('No results found');
+    res.json(JSON.parse(m[0]));
+  } catch(err) {
+    console.error('Find realtors error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
