@@ -164,14 +164,17 @@ app.post('/insights', async (req, res) => {
     });
     const data = await response.json();
     if (data.error) throw new Error(data.error.message);
-    const txt = data.content?.find(b => b.type === 'text')?.text || '';
+    const rawTxt = data.content?.find(b => b.type === 'text')?.text || '';
+    const txt = rawTxt.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
-    if (isChat || mode === 'market') {
+    if (isChat) {
       res.json({ answer: txt });
     } else {
-      const m = txt.match(/\{[\s\S]*\}/);
-      if (!m) { res.json({ answer: txt }); return; }
-      res.json(JSON.parse(m[0]));
+      const s = txt.indexOf('{');
+      const e = txt.lastIndexOf('}');
+      if (s === -1 || e <= s) { res.json({ answer: txt }); return; }
+      try { res.json(JSON.parse(txt.substring(s, e + 1))); }
+      catch(e2) { res.json({ answer: txt }); }
     }
   } catch (err) {
     console.error('Insights error:', err.message);
