@@ -353,7 +353,6 @@ app.post('/build-team', async (req, res) => {
       return { role, professionals: parsed.professionals || [], referral_tip: parsed.referral_tip || '', recommendation: parsed.recommendation || '' };
     }
 
-    // Run all roles in parallel
     const results = await Promise.allSettled(roles.map(role => searchRole(role)));
     const allRoles = results.map((r, i) => r.status === 'fulfilled' ? r.value : { role: roles[i], professionals: [], referral_tip: '', recommendation: '' });
     res.json({ city, roles: allRoles });
@@ -397,7 +396,6 @@ app.post('/find-realtors', async (req, res) => {
     const location = neighbourhood ? neighbourhood + ', ' + city : city;
     const investmentFocus = condition === 'BRRRR' ? 'BRRRR strategy and value-add' : 'turnkey rental';
     const prompt = 'I am a real estate investor looking to find an investor-friendly real estate agent in ' + location + ', Canada specializing in ' + investmentFocus + ' properties. Search Google to find 3 to 5 real options. For each include: name, company, years of experience, specialization (investment properties, multi-family, BRRRR), number of investment clients served last year, known strengths, average response time, fees/commission structure, online presence and reviews, phone, email, website. Also provide: who is best for a new investor and why, and strategies to get referrals. Return JSON only: {"realtors":[{"name":"","company":"","phone":"","email":"","website":"","years":"","specialization":"","investment_clients":"","strengths":"","response_time":"","fees":"","reviews":"","recommended":false}],"recommendation":"","referral_tip":""}. Mark the best one recommended true.';
-
     const msgs = [{ role: 'user', content: prompt }];
     let d;
     let attempts = 0;
