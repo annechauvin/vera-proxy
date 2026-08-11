@@ -16,7 +16,6 @@ app.use((req, res, next) => {
 
 const APPS_URL = 'https://script.google.com/macros/s/AKfycbx8GaIdXWbDkTrqlcgM5kvGX_iMIYfKxl8Z8udZAV9n_kDDYZo9QHPiC99M8jAdEdfW/exec';
 
-// ── Fetch knowledge from Google Sheet ──
 async function fetchKnowledge(category) {
   try {
     const url = APPS_URL + '?action=getKnowledge&category=' + encodeURIComponent(category);
@@ -29,7 +28,6 @@ async function fetchKnowledge(category) {
   }
 }
 
-// ── Knowledge base (file-based fallback) ──
 const KB_DIR = path.join(__dirname, 'knowledge');
 if (!fs.existsSync(KB_DIR)) fs.mkdirSync(KB_DIR);
 
@@ -51,7 +49,6 @@ app.get('/knowledge/:category', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Extract listing ──
 const EXTRACT_SYSTEM = `You are a smart real estate data extraction engine for a Canadian rental property investment tool. Extract data from property listings and return only valid JSON with these exact fields. NEVER invent numbers. If unsure, set to null.
 
 Return this exact JSON:
@@ -114,7 +111,6 @@ app.post('/extract', async (req, res) => {
   }
 });
 
-// ── Send to Apps Script calculator ──
 app.post('/analyze', async (req, res) => {
   try {
     const response = await fetch(APPS_URL, {
@@ -130,51 +126,44 @@ app.post('/analyze', async (req, res) => {
   }
 });
 
-// ── VERA Insights + Chat ──
 app.post('/insights', async (req, res) => {
   try {
     const { prompt, category, mode } = req.body;
     const isChat = mode === 'chat';
 
     let knowledge = '';
-    // Only load knowledge for chat mode - market research uses Claude's own knowledge
-    if (isChat) {
-      try {
-        const cat = category || 'Analyse a property';
-        knowledge = await Promise.race([
-          fetchKnowledge(cat),
-          new Promise(resolve => setTimeout(() => resolve(''), 15000))
-        ]) || '';
-        if (knowledge) console.log('Knowledge loaded:', knowledge.length, 'chars for', cat);
-      } catch(kErr) { knowledge = ''; }
+    try {
+      const cat = category || 'Analyse a property';
+      knowledge = await Promise.race([
+        fetchKnowledge(cat),
+        new Promise(resolve => setTimeout(() => resolve(''), 15000))
+      ]) || '';
+      if (knowledge) console.log('Knowledge loaded:', knowledge.length, 'chars for', cat);
+    } catch(kErr) { knowledge = ''; }
 
-      if (!knowledge) {
-        return res.json({ answer: 'I am not able to access my knowledge base right now. Please try again in a moment.' });
-      }
+    if (isChat && !knowledge) {
+      return res.json({ answer: 'I am not able to access my knowledge base right now. Please try again in a moment.' });
     }
 
     const sysPrompt = isChat
       ? 'You are VERA, a Canadian multifamily real estate investment assistant. Answer ONLY using the knowledge base provided. Be specific and practical. Plain conversational text only.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '')
-      : 'You are a Canadian real estate market research assistant. Use your knowledge of Canadian real estate data from CMHC, StatsCan, and MLS reports. Return ONLY valid JSON as instructed. No markdown, no explanation, no text outside the JSON object.';
+      : 'You are VERA, a real estate investment assistant trained by Anne Chauvin. Answer in plain conversational text. Be specific and practical.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '');
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2048, system: sysPrompt, messages: [{ role: 'user', content: prompt }] })
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4096, system: sysPrompt, messages: [{ role: 'user', content: prompt }] })
     });
     const data = await response.json();
     if (data.error) throw new Error(data.error.message);
-    const rawTxt = data.content?.find(b => b.type === 'text')?.text || '';
-    const txt = rawTxt.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const txt = data.content?.find(b => b.type === 'text')?.text || '';
 
-    if (isChat) {
+    if (isChat || mode === 'market') {
       res.json({ answer: txt });
     } else {
-      const s = txt.indexOf('{');
-      const e = txt.lastIndexOf('}');
-      if (s === -1 || e <= s) { res.json({ answer: txt }); return; }
-      try { res.json(JSON.parse(txt.substring(s, e + 1))); }
-      catch(e2) { res.json({ answer: txt }); }
+      const m = txt.match(/\{[\s\S]*\}/);
+      if (!m) { res.json({ answer: txt }); return; }
+      res.json(JSON.parse(m[0]));
     }
   } catch (err) {
     console.error('Insights error:', err.message);
@@ -182,7 +171,6 @@ app.post('/insights', async (req, res) => {
   }
 });
 
-// ── Get knowledge by category ──
 app.get('/get-knowledge', async (req, res) => {
   try {
     const category = req.query.category || 'Find a Market';
@@ -194,7 +182,6 @@ app.get('/get-knowledge', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Get user analyses ──
 app.get('/get-analyses', async (req, res) => {
   try {
     const email = req.query.email || '';
@@ -222,7 +209,6 @@ app.get('/get-analyses', async (req, res) => {
   }
 });
 
-// ── Save listing ──
 app.post('/save-listing', async (req, res) => {
   try {
     const { email, listing } = req.body;
@@ -238,7 +224,6 @@ app.post('/save-listing', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Search Kijiji ──
 app.get('/search-kijiji', async (req, res) => {
   try {
     const { region, type, maxPrice } = req.query;
@@ -285,7 +270,6 @@ app.get('/search-kijiji', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Fetch listing text ──
 app.post('/fetch-listing-text', async (req, res) => {
   try {
     const { url } = req.body;
@@ -297,7 +281,6 @@ app.post('/fetch-listing-text', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Save search criteria ──
 app.post('/save-search', async (req, res) => {
   try {
     const { email, city, propertyType, maxPrice } = req.body;
@@ -307,7 +290,6 @@ app.post('/save-search', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Get listings ──
 app.get('/get-listings', async (req, res) => {
   try {
     const email = req.query.email || '';
@@ -317,7 +299,6 @@ app.get('/get-listings', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Mark viewed ──
 app.post('/mark-viewed', async (req, res) => {
   try {
     const { email, listingUrl } = req.body;
@@ -327,12 +308,10 @@ app.post('/mark-viewed', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Build closing team ──
 app.post('/build-team', async (req, res) => {
   try {
     const { city } = req.body;
     const roles = ['Real Estate Agent','Real Estate Lawyer','Home Inspector','Insurance Agent'];
-
     async function searchRole(role) {
       const prompt = 'Search Google to find 3 to 5 real ' + role + ' professionals in ' + city + ', Canada who specialize in rental properties or real estate investment. Find their actual phone number, email, and website. Return JSON only: {"professionals":[{"name":"","company":"","phone":"","email":"","website":"","specialization":"","strength":"","years":"","recommended":false}],"referral_tip":"","recommendation":""}. Mark the best one recommended true.';
       const msgs = [{ role: 'user', content: prompt }];
@@ -358,34 +337,27 @@ app.post('/build-team', async (req, res) => {
       const parsed = JSON.parse(m[0]);
       return { role, professionals: parsed.professionals || [], referral_tip: parsed.referral_tip || '', recommendation: parsed.recommendation || '' };
     }
-
     const results = await Promise.allSettled(roles.map(role => searchRole(role)));
     const allRoles = results.map((r, i) => r.status === 'fulfilled' ? r.value : { role: roles[i], professionals: [], referral_tip: '', recommendation: '' });
     res.json({ city, roles: allRoles });
-
   } catch(err) {
     console.error('Build team error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── Save market to Search Criteria tab ──
 app.post('/save-market', async (req, res) => {
   try {
     const { email, city, province, neighbourhood, cls, condition } = req.body;
-    const url = APPS_URL + '?action=saveMarket' +
-      '&email=' + encodeURIComponent(email) +
-      '&city=' + encodeURIComponent(city || '') +
-      '&province=' + encodeURIComponent(province || '') +
-      '&neighbourhood=' + encodeURIComponent(neighbourhood || '') +
-      '&cls=' + encodeURIComponent(cls || '') +
+    const url = APPS_URL + '?action=saveMarket&email=' + encodeURIComponent(email) +
+      '&city=' + encodeURIComponent(city || '') + '&province=' + encodeURIComponent(province || '') +
+      '&neighbourhood=' + encodeURIComponent(neighbourhood || '') + '&cls=' + encodeURIComponent(cls || '') +
       '&condition=' + encodeURIComponent(condition || 'BRRRR');
     const resp = await fetch(url, { redirect: 'follow' });
     res.json(await resp.json());
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Get saved market from Search Criteria tab ──
 app.get('/get-market', async (req, res) => {
   try {
     const email = req.query.email || '';
@@ -395,16 +367,14 @@ app.get('/get-market', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Find realtors ──
 app.post('/find-realtors', async (req, res) => {
   try {
     const { city, neighbourhood, condition } = req.body;
     const location = neighbourhood ? neighbourhood + ', ' + city : city;
     const investmentFocus = condition === 'BRRRR' ? 'BRRRR strategy and value-add' : 'turnkey rental';
-    const prompt = 'I am a real estate investor looking to find an investor-friendly real estate agent in ' + location + ', Canada specializing in ' + investmentFocus + ' properties. Search Google to find 3 to 5 real options. For each include: name, company, years of experience, specialization (investment properties, multi-family, BRRRR), number of investment clients served last year, known strengths, average response time, fees/commission structure, online presence and reviews, phone, email, website. Also provide: who is best for a new investor and why, and strategies to get referrals. Return JSON only: {"realtors":[{"name":"","company":"","phone":"","email":"","website":"","years":"","specialization":"","investment_clients":"","strengths":"","response_time":"","fees":"","reviews":"","recommended":false}],"recommendation":"","referral_tip":""}. Mark the best one recommended true.';
+    const prompt = 'I am a real estate investor looking to find an investor-friendly real estate agent in ' + location + ', Canada specializing in ' + investmentFocus + ' properties. Search Google to find 3 to 5 real options. For each include: name, company, years of experience, specialization, investment clients served last year, known strengths, response time, fees, online presence, phone, email, website. Also provide: best for new investor and referral strategies. Return JSON only: {"realtors":[{"name":"","company":"","phone":"","email":"","website":"","years":"","specialization":"","investment_clients":"","strengths":"","response_time":"","fees":"","reviews":"","recommended":false}],"recommendation":"","referral_tip":""}. Mark best one recommended true.';
     const msgs = [{ role: 'user', content: prompt }];
-    let d;
-    let attempts = 0;
+    let d; let attempts = 0;
     while (attempts < 4) {
       attempts++;
       const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -429,7 +399,6 @@ app.post('/find-realtors', async (req, res) => {
   }
 });
 
-// ── Extract PDF ──
 app.post('/extract-pdf', async (req, res) => {
   try {
     const { pdf, password } = req.body;
