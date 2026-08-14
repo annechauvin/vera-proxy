@@ -126,6 +126,13 @@ app.post('/analyze', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// FIXED: /insights now has real web search (tools array + tool-use
+// loop), same pattern already proven working on /find-realtors and
+// /build-team. Previously this route had no `tools` at all, so every
+// province/city research answer came from training-data recall, not
+// a live lookup.
+// ─────────────────────────────────────────────────────────────
 app.post('/insights', async (req, res) => {
   try {
     const { prompt, category, mode } = req.body;
@@ -146,16 +153,33 @@ app.post('/insights', async (req, res) => {
     }
 
     const sysPrompt = isChat
-      ? 'You are VERA, a Canadian multifamily real estate investment assistant. Use the knowledge base as your primary source, but also use your own knowledge of Canadian cities, streets, and neighbourhoods to answer questions. Never deflect to Google Maps or suggest the user find someone else — just answer directly and specifically.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '')
-      : 'You are VERA, a real estate investment assistant. Answer in plain conversational text. Be specific and practical.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '');
+      ? 'You are VERA, a Canadian multifamily real estate investment assistant. Use the knowledge base as your primary source, but also use web search for current market data, and your own knowledge of Canadian cities, streets, and neighbourhoods to answer questions. Never deflect to Google Maps or suggest the user find someone else — just answer directly and specifically.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '')
+      : 'You are VERA, a real estate investment assistant. Use web search to find current, real data rather than relying on memory — this matters for market statistics like population, income, and pricing, which change over time. Answer in plain conversational text. Be specific and practical.' + (knowledge ? '\n\n=== KNOWLEDGE BASE ===\n' + knowledge : '');
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4096, system: sysPrompt, messages: [{ role: 'user', content: prompt }] })
-    });
-    const data = await response.json();
-    if (data.error) throw new Error(data.error.message);
+    const msgs = [{ role: 'user', content: prompt }];
+    let data;
+    let attempts = 0;
+    while (attempts < 4) {
+      attempts++;
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 4096,
+          system: sysPrompt,
+          messages: msgs,
+          tools: [{ type: 'web_search_20250305', name: 'web_search' }]
+        })
+      });
+      data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+      if (data.stop_reason !== 'tool_use') break;
+      msgs.push({ role: 'assistant', content: data.content });
+      const toolResults = data.content.filter(b => b.type === 'tool_use').map(b => ({ type: 'tool_result', tool_use_id: b.id, content: 'Search completed.' }));
+      msgs.push({ role: 'user', content: toolResults });
+    }
+
     const txt = data.content?.find(b => b.type === 'text')?.text || '';
 
     if (isChat || mode === 'market') {
@@ -367,12 +391,18 @@ app.get('/get-market', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─────────────────────────────────────────────────────────────
+// FIXED: /find-realtors — max_tokens raised 2000 → 4096 (was
+// truncating mid-JSON with a rich 3-5 realtor response), plus a
+// repair fallback if a response is ever cut off anyway, plus a
+// "keep concise" instruction to reduce truncation risk in general.
+// ─────────────────────────────────────────────────────────────
 app.post('/find-realtors', async (req, res) => {
   try {
     const { city, neighbourhood, condition } = req.body;
     const location = neighbourhood ? neighbourhood + ', ' + city : city;
     const investmentFocus = condition === 'BRRRR' ? 'BRRRR strategy and value-add' : 'turnkey rental';
-    const prompt = 'I am a real estate investor looking to find an investor-friendly real estate agent in ' + location + ', Canada specializing in ' + investmentFocus + ' properties. Search Google to find 3 to 5 real options. For each include: name, company, years of experience, specialization, investment clients served last year, known strengths, response time, fees, online presence, phone, email, website. Also provide: best for new investor and referral strategies. Return JSON only: {"realtors":[{"name":"","company":"","phone":"","email":"","website":"","years":"","specialization":"","investment_clients":"","strengths":"","response_time":"","fees":"","reviews":"","recommended":false}],"recommendation":"","referral_tip":""}. Mark best one recommended true.';
+    const prompt = 'I am a real estate investor looking to find an investor-friendly real estate agent in ' + location + ', Canada specializing in ' + investmentFocus + ' properties. Search Google to find 3 to 5 real options. For each include: name, company, years of experience, specialization, investment clients served last year, known strengths, response time, fees, online presence, phone, email, website. Also provide: best for new investor and referral strategies. Return JSON only: {"realtors":[{"name":"","company":"","phone":"","email":"","website":"","years":"","specialization":"","investment_clients":"","strengths":"","response_time":"","fees":"","reviews":"","recommended":false}],"recommendation":"","referral_tip":""}. Mark best one recommended true. Keep every field concise — a short phrase, not a paragraph.';
     const msgs = [{ role: 'user', content: prompt }];
     let d; let attempts = 0;
     while (attempts < 4) {
@@ -380,7 +410,13 @@ app.post('/find-realtors', async (req, res) => {
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, system: 'Search the web then return only valid JSON. No markdown.', messages: msgs, tools: [{ type: 'web_search_20250305', name: 'web_search' }] })
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 4096,
+          system: 'Search the web then return only valid JSON. No markdown.',
+          messages: msgs,
+          tools: [{ type: 'web_search_20250305', name: 'web_search' }]
+        })
       });
       d = await r.json();
       if (d.error) throw new Error(d.error.message);
@@ -392,7 +428,28 @@ app.post('/find-realtors', async (req, res) => {
     const txt = d.content?.find(b => b.type === 'text')?.text || '';
     const m = txt.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('No results found');
-    res.json(JSON.parse(m[0]));
+
+    let parsed;
+    try {
+      parsed = JSON.parse(m[0]);
+    } catch (parseErr) {
+      console.warn('find-realtors: JSON parse failed, attempting repair:', parseErr.message);
+      let repaired = m[0];
+      const lastCompleteObj = repaired.lastIndexOf('},');
+      if (lastCompleteObj > -1) {
+        repaired = repaired.substring(0, lastCompleteObj + 1) + ']}';
+        try {
+          parsed = JSON.parse(repaired);
+          console.warn('find-realtors: repair succeeded, some results may be truncated');
+        } catch (repairErr) {
+          throw new Error('AI response was cut off and could not be repaired — try again');
+        }
+      } else {
+        throw new Error('AI response was cut off and could not be repaired — try again');
+      }
+    }
+
+    res.json(parsed);
   } catch(err) {
     console.error('Find realtors error:', err.message);
     res.status(500).json({ error: err.message });
