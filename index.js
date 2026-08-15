@@ -166,7 +166,7 @@ app.post('/insights', async (req, res) => {
         headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
-          max_tokens: 4096,
+          max_tokens: 8192,
           system: sysPrompt,
           messages: msgs,
           tools: [{ type: 'web_search_20250305', name: 'web_search' }]
