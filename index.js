@@ -470,5 +470,69 @@ app.post('/extract-pdf', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+const FINANCIALS_SYSTEM = `You are a financial document reader for a Canadian mortgage qualification tool. You will be shown one or more documents — pay stubs, T4s, Notices of Assessment, bank statements, loan/credit statements, or similar. Extract ONLY what is actually stated in the documents. NEVER invent or estimate a number that isn't directly supported by the documents shown. If something isn't clearly present, use null.
+
+Return ONLY valid JSON, no markdown, no code fences:
+{
+  "grossAnnualIncome": number or null — total gross (pre-tax) annual income, combining all income documents shown (pay stubs annualized, T4 box 14, NOA line 15000, or self-employment net income),
+  "monthlyDebtPayments": number or null — sum of all recurring monthly debt obligations found (car loans, credit card minimum payments, student loans, lines of credit, etc.) — do NOT include rent or the mortgage being applied for,
+  "availableDownPayment": number or null — total liquid savings available for a down payment, from bank/investment account statements shown. Use the most recent balance,
+  "documentsSeen": [ { "name": "filename as given", "recognizedType": "e.g. Pay stub, T4, NOA, Bank statement, Credit card statement, Unrecognized" } ],
+  "notes": "one short sentence flagging anything uncertain or missing that would affect accuracy, or empty string if nothing to flag"
+}
+
+Be conservative: if a document is blurry, partial, or ambiguous, do not guess — reflect that in "notes" instead of forcing a number.`;
+
+app.post('/extract-financials', async (req, res) => {
+  try {
+    const { documents } = req.body; // [{ name, mimeType, base64 }]
+    if (!documents || !Array.isArray(documents) || !documents.length) {
+      return res.status(400).json({ error: 'No documents provided' });
+    }
+    if (documents.length > 10) {
+      return res.status(400).json({ error: 'Too many documents in one request — please select 10 or fewer' });
+    }
+
+    const content = [];
+    documents.forEach(function(doc) {
+      if (doc.mimeType === 'application/pdf') {
+        content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: doc.base64 } });
+      } else if (doc.mimeType && doc.mimeType.indexOf('image/') === 0) {
+        content.push({ type: 'image', source: { type: 'base64', media_type: doc.mimeType, data: doc.base64 } });
+      }
+      content.push({ type: 'text', text: 'The document above is named: ' + doc.name });
+    });
+    content.push({ type: 'text', text: 'Now extract the financial data as instructed.' });
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        system: FINANCIALS_SYSTEM,
+        messages: [{ role: 'user', content: content }]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('extract-financials: Anthropic API error', response.status, errText);
+      return res.status(502).json({ error: 'Upstream AI request failed (' + response.status + ')' });
+    }
+
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
+    const txt = data.content?.find(function(b) { return b.type === 'text'; })?.text || '';
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('Could not extract financial data from the documents provided');
+    res.json(JSON.parse(m[0]));
+
+  } catch (err) {
+    console.error('extract-financials error:', err.message);
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
 app.get('/', (req, res) => res.json({ status: 'VERA proxy running' }));
 app.listen(process.env.PORT || 3000, () => console.log('Proxy started'));
