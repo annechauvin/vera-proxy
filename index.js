@@ -470,14 +470,16 @@ app.post('/extract-pdf', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-const FINANCIALS_SYSTEM = `You are a financial document reader for a Canadian mortgage qualification tool. You will be shown one or more documents — pay stubs, T4s, Notices of Assessment, bank statements, loan/credit statements, or similar. Extract ONLY what is actually stated in the documents. NEVER invent or estimate a number that isn't directly supported by the documents shown. If something isn't clearly present, use null.
+const FINANCIALS_SYSTEM = `You are a financial document reader for a Canadian mortgage qualification tool. You will be shown one or more documents — pay stubs, T4s, Notices of Assessment, bank statements, investment/RRSP statements, loan/credit statements, or a credit report. Extract ONLY what is actually stated in the documents. NEVER invent or estimate a number that isn't directly supported by the documents shown. If something isn't clearly present, use null.
 
 Return ONLY valid JSON, no markdown, no code fences:
 {
   "grossAnnualIncome": number or null — total gross (pre-tax) annual income, combining all income documents shown (pay stubs annualized, T4 box 14, NOA line 15000, or self-employment net income),
-  "monthlyDebtPayments": number or null — sum of all recurring monthly debt obligations found (car loans, credit card minimum payments, student loans, lines of credit, etc.) — do NOT include rent or the mortgage being applied for,
-  "availableDownPayment": number or null — total liquid savings available for a down payment, from bank/investment account statements shown. Use the most recent balance,
-  "documentsSeen": [ { "name": "filename as given", "recognizedType": "e.g. Pay stub, T4, NOA, Bank statement, Credit card statement, Unrecognized" } ],
+  "totalAssets": number or null — sum of liquid balances shown across bank, investment, and RRSP statements,
+  "monthlyDebtPayments": number or null — sum of all recurring monthly debt obligations found (car loans, credit card minimum payments, student loans, lines of credit) — do NOT include rent or the mortgage being applied for,
+  "availableDownPayment": number or null — funds specifically identifiable as available for a down payment, from bank/investment statements shown. If documents don't distinguish down-payment funds from general assets, use the same figure as totalAssets,
+  "creditScore": number or null — the credit score shown on a credit report (Equifax or TransUnion), if one of the documents is a credit report,
+  "documentsSeen": [ { "name": "filename as given", "recognizedType": "e.g. Pay stub, T4, NOA, Bank statement, Investment statement, Credit card statement, Credit report, Unrecognized" } ],
   "notes": "one short sentence flagging anything uncertain or missing that would affect accuracy, or empty string if nothing to flag"
 }
 
