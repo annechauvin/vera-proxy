@@ -478,17 +478,28 @@ const FINANCIALS_SYSTEM = `You are a financial document reader for a Canadian mo
 
 Return ONLY valid JSON, no markdown, no code fences:
 {
-  "grossAnnualIncome": number or null — total gross (pre-tax) annual income, combining all income documents shown (pay stubs annualized, T4 box 14, NOA line 15000, self-employment net income) plus any recurring deposits clearly identifiable as income on a bank statement,
-  "monthlyExpenses": number or null — your best estimate of average monthly living expenses, based on outgoing transactions visible on a bank statement with itemized transaction detail (excluding debt payments already captured elsewhere, and excluding any amount being saved or invested). If only a balance summary is shown with no transaction detail, use null and say so in notes,
+  "employmentIncome": number or null — monthly salary or wages from a primary job, from pay stubs or T4,
+  "sideIncome": number or null — monthly income from freelance work, investments, or a side business, if shown,
+  "otherIncome": number or null — monthly alimony, child support, pensions, or government benefits, if shown,
+  "grossAnnualIncome": number or null — (employmentIncome + sideIncome + otherIncome) × 12, or your best total annual figure if a monthly breakdown isn't derivable,
+  "monthlyExpenses": number or null — your best aggregate estimate of average monthly living expenses, based on outgoing transactions visible on a bank statement with itemized transaction detail. If only a balance summary is shown with no transaction detail, use null,
   "totalAssets": number or null — sum of liquid balances shown across bank, investment, and RRSP statements,
   "monthlyDebtPayments": number or null — sum of all recurring monthly debt obligations found (car loans, credit card minimum payments, student loans, lines of credit) — do NOT include rent or the mortgage being applied for,
   "availableDownPayment": number or null — funds specifically identifiable as available for a down payment, from bank/investment statements shown. If documents don't distinguish down-payment funds from general assets, use the same figure as totalAssets,
   "creditScore": number or null — the credit score shown on a credit report (Equifax or TransUnion), if one of the documents is a credit report,
+  "transactions": [
+    {
+      "category": "one of: Groceries, Restaurant, Hair, Transportation, Health, Entertainment, Professional dues, Membership, Gym, Utilities, Rent, Gifts, School, Shopping, Trip, Other",
+      "type": "Expense",
+      "month": "3-letter or matching abbreviation: Jan, Feb, Mar, Apr, May, Jun, July, Aug, Sept, Oct, Nov, Dec — based on the transaction's actual date",
+      "amount": number — the transaction amount, always positive
+    }
+  ] — only populate from bank/credit statements with itemized transaction detail. Leave empty if no such statement is shown. Group many small identical-category transactions in the same month into one summed entry per category per month,
   "documentsSeen": [ { "name": "filename as given", "recognizedType": "e.g. Pay stub, T4, NOA, Bank statement, Investment statement, Credit card statement, Credit report, Unrecognized" } ],
   "notes": "one short sentence flagging anything uncertain or missing that would affect accuracy, or empty string if nothing to flag"
 }
 
-Be conservative: if a document is blurry, partial, or ambiguous, do not guess — reflect that in "notes" instead of forcing a number. Expenses in particular require real transaction-level detail to estimate honestly — a balance-only statement is not enough.`;
+Be conservative: if a document is blurry, partial, or ambiguous, do not guess — reflect that in "notes" instead of forcing a number.`;
 
 app.post('/extract-financials', async (req, res) => {
   try {
