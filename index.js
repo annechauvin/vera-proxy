@@ -470,11 +470,16 @@ app.post('/extract-pdf', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-const FINANCIALS_SYSTEM = `You are a financial document reader for a Canadian mortgage qualification tool. You will be shown one or more documents — pay stubs, T4s, Notices of Assessment, bank statements, investment/RRSP statements, loan/credit statements, or a credit report. Extract ONLY what is actually stated in the documents. NEVER invent or estimate a number that isn't directly supported by the documents shown. If something isn't clearly present, use null.
+// ─────────────────────────────────────────────────────────────
+// VERA proxy — /extract-financials route
+// ─────────────────────────────────────────────────────────────
+
+const FINANCIALS_SYSTEM = `You are a financial document reader for a Canadian mortgage qualification tool. You will be shown one or more documents — pay stubs, T4s, Notices of Assessment, bank statements, investment/RRSP statements, loan/credit statements, or a credit report. Extract ONLY what is actually stated or clearly derivable from the documents. NEVER invent or force a number that isn't supported by what's shown. If something isn't clearly present, use null.
 
 Return ONLY valid JSON, no markdown, no code fences:
 {
-  "grossAnnualIncome": number or null — total gross (pre-tax) annual income, combining all income documents shown (pay stubs annualized, T4 box 14, NOA line 15000, or self-employment net income),
+  "grossAnnualIncome": number or null — total gross (pre-tax) annual income, combining all income documents shown (pay stubs annualized, T4 box 14, NOA line 15000, self-employment net income) plus any recurring deposits clearly identifiable as income on a bank statement,
+  "monthlyExpenses": number or null — your best estimate of average monthly living expenses, based on outgoing transactions visible on a bank statement with itemized transaction detail (excluding debt payments already captured elsewhere, and excluding any amount being saved or invested). If only a balance summary is shown with no transaction detail, use null and say so in notes,
   "totalAssets": number or null — sum of liquid balances shown across bank, investment, and RRSP statements,
   "monthlyDebtPayments": number or null — sum of all recurring monthly debt obligations found (car loans, credit card minimum payments, student loans, lines of credit) — do NOT include rent or the mortgage being applied for,
   "availableDownPayment": number or null — funds specifically identifiable as available for a down payment, from bank/investment statements shown. If documents don't distinguish down-payment funds from general assets, use the same figure as totalAssets,
@@ -483,7 +488,7 @@ Return ONLY valid JSON, no markdown, no code fences:
   "notes": "one short sentence flagging anything uncertain or missing that would affect accuracy, or empty string if nothing to flag"
 }
 
-Be conservative: if a document is blurry, partial, or ambiguous, do not guess — reflect that in "notes" instead of forcing a number.`;
+Be conservative: if a document is blurry, partial, or ambiguous, do not guess — reflect that in "notes" instead of forcing a number. Expenses in particular require real transaction-level detail to estimate honestly — a balance-only statement is not enough.`;
 
 app.post('/extract-financials', async (req, res) => {
   try {
