@@ -552,5 +552,28 @@ app.post('/extract-financials', async (req, res) => {
   }
 });
 
+app.post('/update-income-expenses', async (req, res) => {
+  try {
+    const { email, expenseTransactions, salaryByMonth, otherIncomeByMonth } = req.body;
+    if (!email) return res.status(400).json({ error: 'email required' });
+    const response = await fetch(APPS_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'updateIncomeExpenses',
+        email: email,
+        expenseTransactions: expenseTransactions || [],
+        salaryByMonth: salaryByMonth || {},
+        otherIncomeByMonth: otherIncomeByMonth || {}
+      })
+    });
+    const text = await response.text();
+    res.json(JSON.parse(text));
+  } catch (err) {
+    console.error('update-income-expenses error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/', (req, res) => res.json({ status: 'VERA proxy running' }));
 app.listen(process.env.PORT || 3000, () => console.log('Proxy started'));
