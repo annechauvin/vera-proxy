@@ -476,12 +476,14 @@ app.post('/extract-pdf', async (req, res) => {
 
 const FINANCIALS_SYSTEM = `You are a financial document reader for a Canadian mortgage qualification tool. You will be shown one or more documents — pay stubs, T4s, Notices of Assessment, bank statements, investment/RRSP statements, loan/credit statements, or a credit report. Extract ONLY what is actually stated or clearly derivable from the documents. NEVER invent or force a number that isn't supported by what's shown. If something isn't clearly present, use null.
 
+IMPORTANT on income sources: a pay stub or T4 is ALWAYS employment income — put its net pay figure in "employmentIncome", never leave it uncategorized. Only use "sideIncome" for freelance/investment/business income, and "otherIncome" for alimony/child support/pensions/government benefits. grossAnnualIncome MUST be calculated as (employmentIncome + sideIncome + otherIncome) × 12 — never return a grossAnnualIncome total without also populating whichever specific source(s) it came from.
+
 Return ONLY valid JSON, no markdown, no code fences:
 {
   "employmentIncome": number or null — monthly salary or wages from a primary job, from pay stubs or T4,
   "sideIncome": number or null — monthly income from freelance work, investments, or a side business, if shown,
   "otherIncome": number or null — monthly alimony, child support, pensions, or government benefits, if shown,
-  "grossAnnualIncome": number or null — (employmentIncome + sideIncome + otherIncome) × 12, or your best total annual figure if a monthly breakdown isn't derivable,
+  "grossAnnualIncome": number or null — (employmentIncome + sideIncome + otherIncome) × 12. If none of the three sources above could be populated, this must also be null — do not report a total with no source behind it,
   "monthlyExpenses": number or null — your best aggregate estimate of average monthly living expenses, based on outgoing transactions visible on a bank statement with itemized transaction detail. If only a balance summary is shown with no transaction detail, use null,
   "totalAssets": number or null — sum of liquid balances shown across bank, investment, and RRSP statements,
   "monthlyDebtPayments": number or null — sum of all recurring monthly debt obligations found (car loans, credit card minimum payments, student loans, lines of credit) — do NOT include rent or the mortgage being applied for,
