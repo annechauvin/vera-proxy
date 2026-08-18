@@ -503,6 +503,7 @@ Return ONLY valid JSON, no markdown, no code fences:
 
 Be conservative: if a document is blurry, partial, or ambiguous, do not guess — reflect that in "notes" instead of forcing a number.`;
 
+
 app.post('/extract-financials', async (req, res) => {
   try {
     const { documents } = req.body; // [{ name, mimeType, base64 }]
@@ -512,7 +513,7 @@ app.post('/extract-financials', async (req, res) => {
     if (documents.length > 10) {
       return res.status(400).json({ error: 'Too many documents in one request — please select 10 or fewer' });
     }
-
+ 
     const content = [];
     documents.forEach(function(doc) {
       if (doc.mimeType === 'application/pdf') {
@@ -523,31 +524,60 @@ app.post('/extract-financials', async (req, res) => {
       content.push({ type: 'text', text: 'The document above is named: ' + doc.name });
     });
     content.push({ type: 'text', text: 'Now extract the financial data as instructed.' });
-
+ 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2048,
+        max_tokens: 4096,
         system: FINANCIALS_SYSTEM,
         messages: [{ role: 'user', content: content }]
       })
     });
-
+ 
     if (!response.ok) {
       const errText = await response.text();
       console.error('extract-financials: Anthropic API error', response.status, errText);
       return res.status(502).json({ error: 'Upstream AI request failed (' + response.status + ')' });
     }
-
+ 
     const data = await response.json();
     if (data.error) throw new Error(data.error.message);
     const txt = data.content?.find(function(b) { return b.type === 'text'; })?.text || '';
     const m = txt.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Could not extract financial data from the documents provided');
-    res.json(JSON.parse(m[0]));
-
+ 
+    let parsed;
+    try {
+      parsed = JSON.parse(m[0]);
+    } catch (parseErr) {
+      // Response was likely truncated mid-JSON — try to salvage the
+      // transactions array up to its last complete entry, same repair
+      // pattern already working in /find-realtors.
+      console.warn('extract-financials: JSON parse failed, attempting repair:', parseErr.message);
+      let repaired = m[0];
+      const lastCompleteEntry = repaired.lastIndexOf('},');
+      if (lastCompleteEntry > -1) {
+        repaired = repaired.substring(0, lastCompleteEntry + 1);
+        // Close whatever arrays/objects are still open
+        const openBraces = (repaired.match(/{/g)||[]).length - (repaired.match(/}/g)||[]).length;
+        const openBrackets = (repaired.match(/\[/g)||[]).length - (repaired.match(/\]/g)||[]).length;
+        for (let i = 0; i < openBrackets; i++) repaired += ']';
+        for (let i = 0; i < openBraces; i++) repaired += '}';
+        try {
+          parsed = JSON.parse(repaired);
+          console.warn('extract-financials: repair succeeded, some transactions may be missing');
+        } catch (repairErr) {
+          throw new Error('AI response was cut off and could not be repaired — try selecting fewer documents');
+        }
+      } else {
+        throw new Error('AI response was cut off and could not be repaired — try selecting fewer documents');
+      }
+    }
+ 
+    res.json(parsed);
+ 
   } catch (err) {
     console.error('extract-financials error:', err.message);
     res.status(500).json({ error: err.message || 'Internal server error' });
