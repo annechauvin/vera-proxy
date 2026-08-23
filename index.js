@@ -478,6 +478,12 @@ const FINANCIALS_SYSTEM = `You are a financial document reader for a Canadian mo
 
 IMPORTANT on income sources: a pay stub or T4 is ALWAYS employment income — put its net pay figure in "employmentIncome", never leave it uncategorized. Only use "sideIncome" for freelance/investment/business income, and "otherIncome" for alimony/child support/pensions/government benefits. grossAnnualIncome MUST be calculated as (employmentIncome + sideIncome + otherIncome) × 12 — never return a grossAnnualIncome total without also populating whichever specific source(s) it came from.
 
+IMPORTANT on rent: rent paid by Interac e-Transfer almost NEVER says "rent" anywhere on a bank statement — it typically shows only as a generic e-Transfer to a person's name or email. A recurring e-Transfer of the same or similar amount, sent roughly once a month, with no other clear explanation, should be categorized as Rent rather than left as Other or skipped just because it isn't explicitly labeled.
+
+IMPORTANT on completeness: bank statements can have 30-60+ individual transactions per month. Read through the ENTIRE transaction history on EVERY page of every statement shown — do not stop partway or skip transactions to save space. Recurring subscriptions and memberships (gym studios, streaming services, etc.) are easy to miss if you're skimming — look for them specifically. It is far more important to capture every transaction than to keep the output short. Grouping identical-category transactions together in the same month is for tidiness only — never omit a real transaction for the sake of brevity.
+
+Be conservative about NUMBERS: if a document is blurry, partial, or ambiguous, do not guess a number — reflect that in "notes" instead. But be exhaustive about FINDING transactions — thoroughness there is not optional.
+
 Return ONLY valid JSON, no markdown, no code fences:
 {
   "employmentIncome": number or null — monthly salary or wages from a primary job, from pay stubs or T4,
@@ -496,24 +502,27 @@ Return ONLY valid JSON, no markdown, no code fences:
       "month": "3-letter or matching abbreviation: Jan, Feb, Mar, Apr, May, Jun, July, Aug, Sept, Oct, Nov, Dec — based on the transaction's actual date",
       "amount": number — the transaction amount, always positive
     }
-  ] — only populate from bank/credit statements with itemized transaction detail. Leave empty if no such statement is shown. Group many small identical-category transactions in the same month into one summed entry per category per month,
+  ] — populate this exhaustively from every bank/credit statement with itemized transaction detail shown. Leave empty only if no such statement is shown at all. Group multiple small identical-category transactions within the same month into one summed entry per category per month for tidiness, but never drop a transaction just to shorten the list,
+  "statementTotals": [
+    {
+      "documentName": "filename as given",
+      "totalDebits": number or null — the statement's OWN stated total withdrawals/debits/spending figure for the period, if it shows one (often labeled "Total withdrawals," "Total debits," or similar). Use null if the statement doesn't show a total.
+    }
+  ] — one entry per bank/credit statement document shown, used to sanity-check that extracted transactions add up to what the statement itself claims,
   "documentsSeen": [ { "name": "filename as given", "recognizedType": "e.g. Pay stub, T4, NOA, Bank statement, Investment statement, Credit card statement, Credit report, Unrecognized" } ],
   "notes": "one short sentence flagging anything uncertain or missing that would affect accuracy, or empty string if nothing to flag"
-}
-
-Be conservative: if a document is blurry, partial, or ambiguous, do not guess — reflect that in "notes" instead of forcing a number.`;
-
+}`;
 
 app.post('/extract-financials', async (req, res) => {
   try {
-    const { documents } = req.body; // [{ name, mimeType, base64 }]
+    const { documents, knownRentAmount } = req.body;
     if (!documents || !Array.isArray(documents) || !documents.length) {
       return res.status(400).json({ error: 'No documents provided' });
     }
     if (documents.length > 10) {
       return res.status(400).json({ error: 'Too many documents in one request — please select 10 or fewer' });
     }
- 
+
     const content = [];
     documents.forEach(function(doc) {
       if (doc.mimeType === 'application/pdf') {
@@ -523,8 +532,11 @@ app.post('/extract-financials', async (req, res) => {
       }
       content.push({ type: 'text', text: 'The document above is named: ' + doc.name });
     });
-    content.push({ type: 'text', text: 'Now extract the financial data as instructed.' });
- 
+    if (knownRentAmount) {
+      content.push({ type: 'text', text: 'The user has confirmed their rent is exactly $' + knownRentAmount + '/month. Search specifically for a transaction matching this amount (it will likely be an unlabeled Interac e-Transfer) and categorize it as Rent, even without an explicit label.' });
+    }
+    content.push({ type: 'text', text: 'Now extract the financial data as instructed. Remember: read every page and every transaction — completeness matters more than brevity.' });
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
@@ -535,32 +547,28 @@ app.post('/extract-financials', async (req, res) => {
         messages: [{ role: 'user', content: content }]
       })
     });
- 
+
     if (!response.ok) {
       const errText = await response.text();
       console.error('extract-financials: Anthropic API error', response.status, errText);
       return res.status(502).json({ error: 'Upstream AI request failed (' + response.status + ')' });
     }
- 
+
     const data = await response.json();
     if (data.error) throw new Error(data.error.message);
     const txt = data.content?.find(function(b) { return b.type === 'text'; })?.text || '';
     const m = txt.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Could not extract financial data from the documents provided');
- 
+
     let parsed;
     try {
       parsed = JSON.parse(m[0]);
     } catch (parseErr) {
-      // Response was likely truncated mid-JSON — try to salvage the
-      // transactions array up to its last complete entry, same repair
-      // pattern already working in /find-realtors.
       console.warn('extract-financials: JSON parse failed, attempting repair:', parseErr.message);
       let repaired = m[0];
       const lastCompleteEntry = repaired.lastIndexOf('},');
       if (lastCompleteEntry > -1) {
         repaired = repaired.substring(0, lastCompleteEntry + 1);
-        // Close whatever arrays/objects are still open
         const openBraces = (repaired.match(/{/g)||[]).length - (repaired.match(/}/g)||[]).length;
         const openBrackets = (repaired.match(/\[/g)||[]).length - (repaired.match(/\]/g)||[]).length;
         for (let i = 0; i < openBrackets; i++) repaired += ']';
@@ -575,9 +583,9 @@ app.post('/extract-financials', async (req, res) => {
         throw new Error('AI response was cut off and could not be repaired — try selecting fewer documents');
       }
     }
- 
+
     res.json(parsed);
- 
+
   } catch (err) {
     console.error('extract-financials error:', err.message);
     res.status(500).json({ error: err.message || 'Internal server error' });
