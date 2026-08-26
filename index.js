@@ -474,15 +474,13 @@ app.post('/extract-pdf', async (req, res) => {
 // VERA proxy — /extract-financials route
 // ─────────────────────────────────────────────────────────────
 
-const FINANCIALS_SYSTEM = `You are a financial document reader for a Canadian mortgage qualification tool. You will be shown one or more documents — pay stubs, T4s, Notices of Assessment, bank statements, investment/RRSP statements, loan/credit statements, or a credit report. Extract ONLY what is actually stated or clearly derivable from the documents. NEVER invent or force a number that isn't supported by what's shown. If something isn't clearly present, use null.
+const FINANCIALS_SYSTEM = `You are a financial document reader for a Canadian mortgage qualification tool. You will be shown one or more documents — pay stubs, T4s, Notices of Assessment, bank statements, investment/RRSP statements, loan/credit statements, a credit report, or a budget app's category expense summary. Extract ONLY what is actually stated or clearly derivable from the documents. NEVER invent or force a number that isn't supported by what's shown. If something isn't clearly present, use null.
 
 IMPORTANT on income sources: a pay stub or T4 is ALWAYS employment income — put its net pay figure in "employmentIncome", never leave it uncategorized. Only use "sideIncome" for freelance/investment/business income, and "otherIncome" for alimony/child support/pensions/government benefits. grossAnnualIncome MUST be calculated as (employmentIncome + sideIncome + otherIncome) × 12 — never return a grossAnnualIncome total without also populating whichever specific source(s) it came from.
 
-IMPORTANT on rent: rent paid by Interac e-Transfer almost NEVER says "rent" anywhere on a bank statement — it typically shows only as a generic e-Transfer to a person's name or email. A recurring e-Transfer of the same or similar amount, sent roughly once a month, with no other clear explanation, should be categorized as Rent rather than left as Other or skipped just because it isn't explicitly labeled.
+IMPORTANT on expenses — reading a budget app's category summary: this is a clean table or list of category names with amounts (e.g. "Groceries: $487", "Dining Out: $120"), usually for a specific month or period, NOT a raw bank statement transaction list. Read every row. Map the budget app's own category names to the closest match in the allowed list below — e.g. "Food & Dining" or "Dining Out" → Restaurant, "Housing" or "Rent/Mortgage" → Rent, "Health & Fitness" → Gym or Health depending on what's clearly meant, "Subscriptions" → Membership. If a document shows a specific month or date range, use that month; if unclear, use the most reasonable single month it represents. Each category row becomes ONE transaction entry with that category's full amount — do not attempt to break a category total back down into individual purchases.
 
-IMPORTANT on completeness: bank statements can have 30-60+ individual transactions per month. Read through the ENTIRE transaction history on EVERY page of every statement shown — do not stop partway or skip transactions to save space. Recurring subscriptions and memberships (gym studios, streaming services, etc.) are easy to miss if you're skimming — look for them specifically. It is far more important to capture every transaction than to keep the output short. Grouping identical-category transactions together in the same month is for tidiness only — never omit a real transaction for the sake of brevity.
-
-Be conservative about NUMBERS: if a document is blurry, partial, or ambiguous, do not guess a number — reflect that in "notes" instead. But be exhaustive about FINDING transactions — thoroughness there is not optional.
+Be conservative about NUMBERS: if a document is blurry, partial, or ambiguous, do not guess a number — reflect that in "notes" instead.
 
 Return ONLY valid JSON, no markdown, no code fences:
 {
@@ -490,7 +488,7 @@ Return ONLY valid JSON, no markdown, no code fences:
   "sideIncome": number or null — monthly income from freelance work, investments, or a side business, if shown,
   "otherIncome": number or null — monthly alimony, child support, pensions, or government benefits, if shown,
   "grossAnnualIncome": number or null — (employmentIncome + sideIncome + otherIncome) × 12. If none of the three sources above could be populated, this must also be null — do not report a total with no source behind it,
-  "monthlyExpenses": number or null — your best aggregate estimate of average monthly living expenses, based on outgoing transactions visible on a bank statement with itemized transaction detail. If only a balance summary is shown with no transaction detail, use null,
+  "monthlyExpenses": number or null — the total monthly expense figure, if the budget app summary shows one directly (its own grand total),
   "totalAssets": number or null — sum of liquid balances shown across bank, investment, and RRSP statements,
   "monthlyDebtPayments": number or null — sum of all recurring monthly debt obligations found (car loans, credit card minimum payments, student loans, lines of credit) — do NOT include rent or the mortgage being applied for,
   "availableDownPayment": number or null — funds specifically identifiable as available for a down payment, from bank/investment statements shown. If documents don't distinguish down-payment funds from general assets, use the same figure as totalAssets,
@@ -499,28 +497,28 @@ Return ONLY valid JSON, no markdown, no code fences:
     {
       "category": "one of: Groceries, Restaurant, Hair, Transportation, Health, Entertainment, Professional dues, Membership, Gym, Utilities, Rent, Gifts, School, Shopping, Trip, Other",
       "type": "Expense",
-      "month": "3-letter or matching abbreviation: Jan, Feb, Mar, Apr, May, Jun, July, Aug, Sept, Oct, Nov, Dec — based on the transaction's actual date",
-      "amount": number — the transaction amount, always positive
+      "month": "3-letter or matching abbreviation: Jan, Feb, Mar, Apr, May, Jun, July, Aug, Sept, Oct, Nov, Dec — the month this category total represents",
+      "amount": number — the category's full amount for that month, as shown in the budget app summary
     }
-  ] — populate this exhaustively from every bank/credit statement with itemized transaction detail shown. Leave empty only if no such statement is shown at all. Group multiple small identical-category transactions within the same month into one summed entry per category per month for tidiness, but never drop a transaction just to shorten the list,
+  ] — one entry per category per month shown in the budget app summary. If multiple months' summaries are provided, include one row per category per month,
   "statementTotals": [
     {
       "documentName": "filename as given",
-      "totalDebits": number or null — the statement's OWN stated total withdrawals/debits/spending figure for the period, if it shows one (often labeled "Total withdrawals," "Total debits," or similar). Use null if the statement doesn't show a total.
+      "totalDebits": number or null — this document's own stated grand total, if it shows one, used to sanity-check that the category rows add up correctly
     }
-  ] — one entry per bank/credit statement document shown, used to sanity-check that extracted transactions add up to what the statement itself claims,
-  "documentsSeen": [ { "name": "filename as given", "recognizedType": "e.g. Pay stub, T4, NOA, Bank statement, Investment statement, Credit card statement, Credit report, Unrecognized" } ],
+  ] — one entry per document shown,
+  "documentsSeen": [ { "name": "filename as given", "recognizedType": "e.g. Pay stub, T4, NOA, Bank statement, Investment statement, Credit card statement, Credit report, Budget app summary, Unrecognized" } ],
   "notes": "one short sentence flagging anything uncertain or missing that would affect accuracy, or empty string if nothing to flag"
 }`;
 
 app.post('/extract-financials', async (req, res) => {
   try {
-    const { documents, knownRentAmount } = req.body;
+    const { documents } = req.body;
     if (!documents || !Array.isArray(documents) || !documents.length) {
       return res.status(400).json({ error: 'No documents provided' });
     }
-    if (documents.length > 10) {
-      return res.status(400).json({ error: 'Too many documents in one request — please select 10 or fewer' });
+    if (documents.length > 15) {
+      return res.status(400).json({ error: 'Too many documents in one request — please select 15 or fewer' });
     }
 
     const content = [];
@@ -532,10 +530,7 @@ app.post('/extract-financials', async (req, res) => {
       }
       content.push({ type: 'text', text: 'The document above is named: ' + doc.name });
     });
-    if (knownRentAmount) {
-      content.push({ type: 'text', text: 'The user has confirmed their rent is exactly $' + knownRentAmount + '/month. Search specifically for a transaction matching this amount (it will likely be an unlabeled Interac e-Transfer) and categorize it as Rent, even without an explicit label.' });
-    }
-    content.push({ type: 'text', text: 'Now extract the financial data as instructed. Remember: read every page and every transaction — completeness matters more than brevity.' });
+    content.push({ type: 'text', text: 'Now extract the financial data as instructed.' });
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -575,7 +570,7 @@ app.post('/extract-financials', async (req, res) => {
         for (let i = 0; i < openBraces; i++) repaired += '}';
         try {
           parsed = JSON.parse(repaired);
-          console.warn('extract-financials: repair succeeded, some transactions may be missing');
+          console.warn('extract-financials: repair succeeded, some data may be missing');
         } catch (repairErr) {
           throw new Error('AI response was cut off and could not be repaired — try selecting fewer documents');
         }
