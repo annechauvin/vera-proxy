@@ -586,7 +586,41 @@ app.post('/extract-financials', async (req, res) => {
     res.status(500).json({ error: err.message || 'Internal server error' });
   }
 });
+// ─────────────────────────────────────────────────────────────
+// VERA proxy — NEW route: /update-gds-tds
+// ─────────────────────────────────────────────────────────────
+app.post('/update-gds-tds', async (req, res) => {
+  try {
+    const { email, monthlyGrossIncome, mortgagePayment, propertyTaxes, heatingCosts, condoFees, carLoan, studentLoan, creditCardPayments, otherDebtPayments } = req.body;
+    if (!email) return res.status(400).json({ error: 'email required' });
+    const response = await fetch(APPS_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'updateGdsTds',
+        email: email,
+        monthlyGrossIncome: monthlyGrossIncome || 0,
+        mortgagePayment: mortgagePayment || 0,
+        propertyTaxes: propertyTaxes || 0,
+        heatingCosts: heatingCosts || 0,
+        condoFees: condoFees || 0,
+        carLoan: carLoan || 0,
+        studentLoan: studentLoan || 0,
+        creditCardPayments: creditCardPayments || 0,
+        otherDebtPayments: otherDebtPayments || 0
+      })
+    });
+    const text = await response.text();
+    res.json(JSON.parse(text));
+  } catch (err) {
+    console.error('update-gds-tds error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
+// ─────────────────────────────────────────────────────────────
+// VERA proxy — NEW route: /update-income-expenses
+// ─────────────────────────────────────────────────────────────
 app.post('/update-income-expenses', async (req, res) => {
   try {
     const { email, expenseTransactions, salaryByMonth, otherIncomeByMonth } = req.body;
