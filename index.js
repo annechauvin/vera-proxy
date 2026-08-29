@@ -589,9 +589,15 @@ app.post('/extract-financials', async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // VERA proxy — NEW route: /update-gds-tds
 // ─────────────────────────────────────────────────────────────
+
 app.post('/update-gds-tds', async (req, res) => {
   try {
-    const { email, monthlyGrossIncome, mortgagePayment, propertyTaxes, heatingCosts, condoFees, carLoan, studentLoan, creditCardPayments, otherDebtPayments } = req.body;
+    const {
+      email,
+      applicant1Income, applicant2Income, childSupport, alimony, sideHustle, rentalIncome1, rentalIncome2,
+      mortgagePayment, propertyTaxes, heatingCosts, condoFees,
+      carLoan, studentLoan, creditCardPayments, rentalProperty1Mortgage, rentalProperty2Mortgage, otherDebtPayments
+    } = req.body;
     if (!email) return res.status(400).json({ error: 'email required' });
     const response = await fetch(APPS_URL, {
       method: 'POST', redirect: 'follow',
@@ -599,7 +605,13 @@ app.post('/update-gds-tds', async (req, res) => {
       body: JSON.stringify({
         action: 'updateGdsTds',
         email: email,
-        monthlyGrossIncome: monthlyGrossIncome || 0,
+        applicant1Income: applicant1Income || 0,
+        applicant2Income: applicant2Income || 0,
+        childSupport: childSupport || 0,
+        alimony: alimony || 0,
+        sideHustle: sideHustle || 0,
+        rentalIncome1: rentalIncome1 || 0,
+        rentalIncome2: rentalIncome2 || 0,
         mortgagePayment: mortgagePayment || 0,
         propertyTaxes: propertyTaxes || 0,
         heatingCosts: heatingCosts || 0,
@@ -607,6 +619,8 @@ app.post('/update-gds-tds', async (req, res) => {
         carLoan: carLoan || 0,
         studentLoan: studentLoan || 0,
         creditCardPayments: creditCardPayments || 0,
+        rentalProperty1Mortgage: rentalProperty1Mortgage || 0,
+        rentalProperty2Mortgage: rentalProperty2Mortgage || 0,
         otherDebtPayments: otherDebtPayments || 0
       })
     });
