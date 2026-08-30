@@ -597,8 +597,7 @@ app.post('/update-gds-tds', async (req, res) => {
       applicant1Income, applicant2Income, childSupport, alimony, sideHustle, rentalIncome1, rentalIncome2,
       mortgagePayment, propertyTaxes, heatingCosts, condoFees,
       carLoan, studentLoan, creditCardPayments, rentalProperty1Mortgage, rentalProperty2Mortgage, otherDebtPayments,
-      expectedAnnualRentalIncome, expectedMonthlyPropertyTaxes, expectedMonthlyHeatingCosts, expectedMonthlyCondoFees,
-      propertyAskingPrice, specificRentalIncome, specificPropertyTaxes, specificHeatingCosts, specificCondoFees
+      expectedAnnualRentalIncome, expectedMonthlyPropertyTaxes, expectedMonthlyHeatingCosts, expectedMonthlyCondoFees
     } = req.body;
     if (!email) return res.status(400).json({ error: 'email required' });
     const response = await fetch(APPS_URL, {
@@ -627,12 +626,7 @@ app.post('/update-gds-tds', async (req, res) => {
         expectedAnnualRentalIncome: expectedAnnualRentalIncome != null ? expectedAnnualRentalIncome : 12000,
         expectedMonthlyPropertyTaxes: expectedMonthlyPropertyTaxes != null ? expectedMonthlyPropertyTaxes : 300,
         expectedMonthlyHeatingCosts: expectedMonthlyHeatingCosts != null ? expectedMonthlyHeatingCosts : 100,
-        expectedMonthlyCondoFees: expectedMonthlyCondoFees != null ? expectedMonthlyCondoFees : 0,
-        propertyAskingPrice: propertyAskingPrice != null ? propertyAskingPrice : null,
-        specificRentalIncome: specificRentalIncome || 0,
-        specificPropertyTaxes: specificPropertyTaxes || 0,
-        specificHeatingCosts: specificHeatingCosts || 0,
-        specificCondoFees: specificCondoFees || 0
+        expectedMonthlyCondoFees: expectedMonthlyCondoFees != null ? expectedMonthlyCondoFees : 0
       })
     });
     const text = await response.text();
