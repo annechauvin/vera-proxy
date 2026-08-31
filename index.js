@@ -665,3 +665,114 @@ app.post('/update-income-expenses', async (req, res) => {
 
 app.get('/', (req, res) => res.json({ status: 'VERA proxy running' }));
 app.listen(process.env.PORT || 3000, () => console.log('Proxy started'));
+
+
+// ─────────────────────────────────────────────────────────────
+// VERA proxy — NEW route: /search-properties
+// Add this anywhere among your other routes in index.js.
+//
+// Uses Claude's built-in web search tool to find real, current
+// listings matching the user's saved criteria — searching public,
+// already-crawlable sites (Kijiji, REW.ca, brokerage sites, etc.),
+// the same category of source Google itself surfaces. This is NOT
+// a scraper hitting any site's servers directly, and it is NOT MLS
+// data — it's a search, same as a person typing the query into
+// Google themselves, just automated and summarized.
+//
+// Requires ANTHROPIC_API_KEY to already be set in your environment
+// (same one your /extract and /insights routes already use).
+// ─────────────────────────────────────────────────────────────
+app.post('/search-properties', async (req, res) => {
+  try {
+    const {
+      city, propertyType, condition, priceMin, priceMax,
+      neighborhoods, bedrooms, parking, lotSize
+    } = req.body;
+
+    if (!city) return res.status(400).json({ error: 'city is required' });
+
+    const criteriaLines = [
+      `City: ${city}`,
+      propertyType ? `Property type(s): ${propertyType}` : null,
+      priceMin || priceMax ? `Price range: ${priceMin ? '$'+Number(priceMin).toLocaleString() : 'no min'} to ${priceMax ? '$'+Number(priceMax).toLocaleString() : 'no max'}` : null,
+      neighborhoods ? `Preferred neighbourhoods: ${neighborhoods}` : null,
+      bedrooms ? `Bedrooms: ${bedrooms}` : null,
+      parking ? `Parking: ${parking}` : null,
+      lotSize ? `Lot size / outdoor space: ${lotSize}` : null,
+      condition ? `Condition preference: ${condition}` : null
+    ].filter(Boolean).join('\n');
+
+    const SEARCH_SYSTEM = `You are a real estate search assistant. Search the public web for CURRENT, REAL property listings matching the given criteria. Only include listings you actually find via search — never invent or guess at a listing that didn't appear in your search results.
+
+After searching, respond with ONLY a JSON object (no other text, no markdown fences) in exactly this shape:
+{
+  "listings": [
+    {
+      "address": "string — the address or general location as stated in the listing, or \\"Location not disclosed\\" if the source doesn't give one",
+      "price": number or null,
+      "propertyType": "string — e.g. Duplex, Triplex, Fourplex, or whatever the listing states",
+      "description": "string — a brief 1-2 sentence paraphrase in your own words, never a verbatim copy of the listing text",
+      "sourceUrl": "string — the actual URL where you found this listing",
+      "sourceName": "string — e.g. Kijiji, REW.ca, Realtor.ca, or the brokerage site name"
+    }
+  ],
+  "searchSummary": "string — one sentence on what was searched for and roughly how many relevant results were found"
+}
+
+If you find no matching listings at all, return {"listings": [], "searchSummary": "..."} explaining that plainly. Never fabricate a listing to fill space. Limit to the 8 most relevant results.`;
+
+    const userMsg = `Find current property listings matching these criteria:\n\n${criteriaLines}`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        system: SEARCH_SYSTEM,
+        messages: [{ role: 'user', content: userMsg }],
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(500).json({ error: 'Search API error: ' + errText.slice(0, 300) });
+    }
+
+    const data = await response.json();
+
+    // Final text response is in the last text-type content block —
+    // tool_use / server_tool_use / web_search_tool_result blocks come
+    // before it when the model actually searched.
+    const textBlocks = (data.content || []).filter(b => b.type === 'text');
+    const rawText = textBlocks.length ? textBlocks[textBlocks.length - 1].text : '';
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText.trim());
+    } catch (parseErr) {
+      // Same repair pattern as extract-financials — strip markdown fences
+      // or leading/trailing junk the model might have added despite instructions.
+      const cleaned = rawText.replace(/```json|```/g, '').trim();
+      const firstBrace = cleaned.indexOf('{');
+      const lastBrace = cleaned.lastIndexOf('}');
+      try {
+        parsed = JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+      } catch (repairErr) {
+        return res.status(500).json({ error: 'Could not parse search results', raw: rawText.slice(0, 500) });
+      }
+    }
+
+    if (!parsed.listings) parsed.listings = [];
+    res.json({ success: true, ...parsed });
+
+  } catch (err) {
+    console.error('search-properties error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
