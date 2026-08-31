@@ -669,7 +669,6 @@ app.listen(process.env.PORT || 3000, () => console.log('Proxy started'));
 
 // ─────────────────────────────────────────────────────────────
 // VERA proxy — NEW route: /search-properties
-// Add this anywhere among your other routes in index.js.
 //
 // Uses Claude's built-in web search tool to find real, current
 // listings matching the user's saved criteria — searching public,
@@ -685,7 +684,7 @@ app.listen(process.env.PORT || 3000, () => console.log('Proxy started'));
 app.post('/search-properties', async (req, res) => {
   try {
     const {
-      city, propertyType, condition, priceMin, priceMax,
+      city, propertyType, condition, conditionKey, priceMin, priceMax,
       neighborhoods, bedrooms, parking, lotSize
     } = req.body;
 
@@ -702,7 +701,19 @@ app.post('/search-properties', async (req, res) => {
       condition ? `Condition preference: ${condition}` : null
     ].filter(Boolean).join('\n');
 
+    const focusInstruction = conditionKey === 'valueadd'
+      ? '\n\nThe user specifically wants VALUE-ADD / BRRRR POTENTIAL properties only — focus your search on properties needing updates, below-market rents, or renovation potential. Do not return turnkey/move-in-ready properties.'
+      : conditionKey === 'turnkey'
+      ? '\n\nThe user specifically wants TURNKEY POTENTIAL properties only — focus your search on move-in ready properties with minimal work needed. Do not return properties needing significant renovation.'
+      : '';
+
     const SEARCH_SYSTEM = `You are a real estate search assistant. Search the public web for CURRENT, REAL property listings matching the given criteria. Only include listings you actually find via search — never invent or guess at a listing that didn't appear in your search results.
+
+IMPORTANT — availability: only return properties that are currently ACTIVE and available for purchase. If a source page indicates a property is Sold, Pending, Under Contract, or otherwise no longer available, EXCLUDE it entirely — do not include it in the results at all.
+
+IMPORTANT — price: many listings omit price from search snippets. Make a genuine effort to find the actual asking price by checking the listing page itself, not just the snippet. Only leave price null if you genuinely cannot find it after trying — do not guess or estimate a price.
+
+IMPORTANT — strategyBucket: classify each listing as exactly one of "BRRRR Potential" or "Turnkey Potential", based on the listing's actual stated condition and rent-to-price ratio. Only an actual analysis and property walkthrough can confirm which one a property truly is — this is a preliminary read, so the word "Potential" always matters here, never drop it or state either as confirmed fact.
 
 After searching, respond with ONLY a JSON object (no other text, no markdown fences) in exactly this shape:
 {
@@ -711,6 +722,8 @@ After searching, respond with ONLY a JSON object (no other text, no markdown fen
       "address": "string — the address or general location as stated in the listing, or \\"Location not disclosed\\" if the source doesn't give one",
       "price": number or null,
       "propertyType": "string — e.g. Duplex, Triplex, Fourplex, or whatever the listing states",
+      "status": "string — one of: Active, Unknown (never include Sold/Pending listings at all, per the instruction above)",
+      "strategyBucket": "string — exactly \\"BRRRR Potential\\" or \\"Turnkey Potential\\"",
       "description": "string — a brief 1-2 sentence paraphrase in your own words, never a verbatim copy of the listing text",
       "sourceUrl": "string — the actual URL where you found this listing",
       "sourceName": "string — e.g. Kijiji, REW.ca, Realtor.ca, or the brokerage site name"
@@ -721,7 +734,7 @@ After searching, respond with ONLY a JSON object (no other text, no markdown fen
 
 If you find no matching listings at all, return {"listings": [], "searchSummary": "..."} explaining that plainly. Never fabricate a listing to fill space. Limit to the 8 most relevant results.`;
 
-    const userMsg = `Find current property listings matching these criteria:\n\n${criteriaLines}`;
+    const userMsg = `Find current property listings matching these criteria:\n\n${criteriaLines}${focusInstruction}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
