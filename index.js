@@ -471,6 +471,27 @@ app.post('/extract-pdf', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// VERA proxy — NEW route: /record-signup
+// Forwards to Apps Script's recordSignup action.
+// ─────────────────────────────────────────────────────────────
+app.post('/record-signup', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'email required' });
+    const response = await fetch(APPS_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'recordSignup', email: email })
+    });
+    const text = await response.text();
+    res.json(JSON.parse(text));
+  } catch (err) {
+    console.error('record-signup error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 // VERA proxy — /extract-financials route
 // ─────────────────────────────────────────────────────────────
 
