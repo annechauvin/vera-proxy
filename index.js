@@ -492,6 +492,26 @@ app.post('/record-signup', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// VERA proxy — refinance-projection
+// ─────────────────────────────────────────────────────────────
+app.post('/refinance-projection', async (req, res) => {
+  try {
+    const { arv } = req.body;
+    if (!arv) return res.status(400).json({ error: 'arv is required' });
+    const response = await fetch(APPS_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'refinanceProjection', arv: arv })
+    });
+    const text = await response.text();
+    res.json(JSON.parse(text));
+  } catch (err) {
+    console.error('refinance-projection error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 // VERA proxy — /extract-financials route
 // ─────────────────────────────────────────────────────────────
 
