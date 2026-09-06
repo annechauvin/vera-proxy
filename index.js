@@ -50,7 +50,7 @@ app.get('/knowledge/:category', (req, res) => {
 });
 
 const EXTRACT_SYSTEM = `You are a smart real estate data extraction engine for a Canadian rental property investment tool. Extract data from property listings and return only valid JSON with these exact fields. NEVER invent numbers. If unsure, set to null.
-
+IMPORTANT — PropertyUsage: this tool is used by investors buying purely as a rental investment. Default to "Full rental" in every case. Only use "Owner-occupied duplex"/"Owner-occupied triplex" if the person pasting the listing explicitly states THEY THEMSELVES plan to live in one of the units — this must come from their own note, never from the listing text. A listing describing the property as "ideal for owner occupancy," "great for an owner-occupier," or similar is marketing language about the property's general suitability for *some* hypothetical buyer — it says nothing about this specific buyer's actual plans, and must NOT be treated as evidence for "Owner-occupied duplex"/"Owner-occupied triplex". When in doubt, use "Full rental".
 Return this exact JSON:
 {
   "PropertyAddress": string or null,
