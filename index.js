@@ -838,3 +838,28 @@ If you find no matching listings at all, return {"listings": [], "searchSummary"
     res.status(500).json({ error: err.message });
   }
 });
+// ─────────────────────────────────────────────────────────────
+// VERA proxy — NEW route: /submit-preapproval
+// ─────────────────────────────────────────────────────────────
+app.post('/submit-preapproval', async (req, res) => {
+  try {
+    const { userEmail, propertyAddress, submittedAt, answers } = req.body;
+    if (!answers) return res.status(400).json({ error: 'answers required' });
+    const response = await fetch(APPS_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'submitPreApproval',
+        userEmail: userEmail,
+        propertyAddress: propertyAddress,
+        submittedAt: submittedAt,
+        answers: answers
+      })
+    });
+    const text = await response.text();
+    res.json(JSON.parse(text));
+  } catch (err) {
+    console.error('submit-preapproval error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
